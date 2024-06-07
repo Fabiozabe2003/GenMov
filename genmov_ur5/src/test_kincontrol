@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+import rospy
+from sensor_msgs.msg import JointState
+from markers import *
+from lab4functions import *
+
+if __name__ == '__main__':
+
+    # Initialize the node
+    rospy.init_node("testKineControlPosition")
+    print('starting motion ... ')
+    # Publisher: publish to the joint_states topic
+    pub = rospy.Publisher('joint_states', JointState, queue_size=10)
+ 
+    # Markers for the current and desired positions
+    bmarker_current  = BallMarker(color['RED'])
+    bmarker_desired = BallMarker(color['GREEN'])
+
+     # Joint names
+    jnames = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
+
+    # Desired position
+    xd = np.array([-0.53379031, -0.37085507, -0.0543844 ]) 
+    # Initial configuration
+    q0 = np.array([0.0, 0, 0, 0, 0,0])
+
+    # Resulting initial position (end effector with respect to the base link)
+    T = fkine_ur5(q0)
+    x0 = T[0:3,3]
+
+    # Red marker shows the achieved position
+    bmarker_current.xyz(x0)
+    # Green marker shows the desired position
+    bmarker_desired.xyz(xd)
+
+    # Instance of the JointState message
+    jstate = JointState()
+    # Values of the message
+    jstate.header.stamp = rospy.Time.now()
+    jstate.name = jnames
+    # Add the head joint value (with value 0) to the joints
+    jstate.position = q0
+    
+    # Frequency (in Hz) and control period 
+    freq = 200
+    dt = 1.0/freq
+    rate = rospy.Rate(freq)
+
+    # Initial joint configuration
+    q = copy(q0)
+    k = 0.8
+    # Main loop
+    while not rospy.is_shutdown():
+        # Current time (needed for ROS)
+        jstate.header.stamp = rospy.Time.now()
+        # Kinematic control law for position (complete here)
+        # -----------------------------
+        T = fkine_ur5(q)
+        x = T[0:3,3]
+        error = x - xd
+        derror = -k*error
+        
+        Jacobian=jacobian_ur5(q)
+        if np.linalg.det(Jacobian@Jacobian.T) < 0.00001:
+            print("singularidad !")
+            break
+        dq = np.linalg.pinv(Jacobian).dot(derror)
+        q = q + dt*dq
+        
+    
+        # Publish the message
+        jstate.position = q
+        pub.publish(jstate)
+        bmarker_desired.xyz(xd)
+        bmarker_current.xyz(x)
+
+        if (np.linalg.norm(error) < 0.001):
+            break
+        # Wait for the next iteration
+        rate.sleep()
+
+    print('ending motion ...')
+ 

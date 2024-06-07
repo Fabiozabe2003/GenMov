@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+
+import rospy
+from sensor_msgs.msg import JointState
+from markers import *
+from lab4functions import *
+
+if __name__ == '__main__':
+
+    rospy.init_node("testdiffkine")
+    pub = rospy.Publisher('joint_states', JointState, queue_size=1)
+
+    bmarker_current  = FrameMarker()
+    bmarker_desired = FrameMarker(0.5)
+
+    # Joint names
+    jnames = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
+
+   # Desired pose
+    ang = np.pi
+    Rd = roty(ang)
+    qd = rot2quat(Rd)
+    print(qd)
+    # Find an xd that the robot can reach
+    xd = np.array([-0.55, 0.55, 0.55, qd[0], qd[1], qd[2], qd[3]])
+    #xd  = np.array([0.5, 0.5, 0.6, np.cos(ang/2.0), 0, 0, np.sin(ang/2.0)])
+    # Initial configuration
+    q0  = np.array([0.0, 0, 0, 0, 0, 0])
+
+    # Resulting initial pose (end effector with respect to the base link)
+    T = fkine_ur5(q0)
+    x0 = TF2xyzquat(T)
+
+    # Markers for the current and the desired pose
+    bmarker_current.setPose(x0)
+    bmarker_desired.setPose(xd)
+
+    # Instance of the JointState message
+    jstate = JointState()
+    # Values of the message
+    jstate.header.stamp = rospy.Time.now()
+    jstate.name = jnames
+    # Add the head joint value (with value 0) to the joints
+    jstate.position = q0
+
+    # Frequency (in Hz) and control period 
+    freq = 200
+    dt = 1.0/freq
+    rate = rospy.Rate(freq)
+
+    # Initial joint configuration
+    q = copy(q0)
+    x = copy(x0)
+    k=10
+    quat = x[3:7]
+    # Initialize the derror vector (derivative of the error)
+    derror = np.zeros(7)
+    # Main loop
+    #for i in range(1):
+    while not rospy.is_shutdown():
+        # Current time (needed for ROS)
+        jstate.header.stamp = rospy.Time.now()
+        # Kinematic control law for the pose (complete here)
+        # --------------------------------------------------
+        T = fkine_ur5(q)
+        x =  TF2xyzquat(T)
+        error = x - xd
+        #werror = xd[3]*x[3] + xd[4:7].T@x[4:7]
+        #eerror = -xd[3]*x[4:7]+x[3]*xd[4:7]-np.cross(xd[4:7],x[4:7])
+        #error[3] = werror
+        #error[4:7] = eerror
+        derror = -0.8*error
+
+        J = jacobian_pose(q)
+
+        if (np.linalg.matrix_rank(J, 1e-4)<7):
+            dq = (J.T @ np.linalg.inv(J@J.T + 0.01*np.eye(7))).dot(derror)
+            q =  q + dt*dq
+            print("GAAA")
+        
+        else:
+            dq = np.linalg.pinv(J).dot(derror)
+            q =  q + dt*dq
+
+        # Publish the message
+        jstate.position = q
+        pub.publish(jstate)
+        bmarker_desired.setPose(xd)
+        bmarker_current.setPose(x)
+
+        if (np.linalg.norm(error) < 0.01):
+            T = fkine_ur5(q)
+            print(qd)
+            print(rot2quat(T[0:3,0:3]))
+            print(T)
+            break
+
+        # Wait for the next iteration
+        rate.sleep()
