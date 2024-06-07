@@ -27,25 +27,6 @@ def fkine_sawyer(q):
     T5 = dh(0.4,        q[4],          0,      -pi/2)
     T6 = dh(0.1363,     q[5]+pi,       0,      -pi/2)
     T7 = dh(0.13475,    q[6]+3*pi/2,   0,      0)
-    
-    #Shiwei Wang
-    """T1 = dh(0.237,      q[0],   0.081,  -pi/2)
-    T2 = dh(0.1925,     q[1],   0,      -pi/2)
-    T3 = dh(0.4,        q[2],   0,      -pi/2)
-    T4 = dh(-0.1685,    q[3],   0,      -pi/2)
-    T5 = dh(0.4,        q[4],   0,      -pi/2)
-    T6 = dh(0.1363,     q[5],   0,      -pi/2)
-    T7 = dh(0.11,       q[6],   0,      0)"""
-
-    #Elaboración propia
-    """T1 = dh(0.0,      q[0]+pi,   -0.081,  -pi/2)
-    T2 = dh(0.1925,     q[1]-pi/2,   0,      pi/2)
-    T3 = dh(0.400,        q[2],   0,      pi/2)
-    T4 = dh(0.1685,    q[3]+pi,   0,      -pi/2)
-    T5 = dh(0.400,        q[4],   0,      pi/2)
-    T6 = dh(0.1363,     q[5]+pi,   0,      pi/2)
-    T7 = dh(0.13375,       q[6],   0,      0)"""
-
     # Efector final con respecto a la base
     T = T1@T2@T3@T4@T5@T6@T7
     return T
