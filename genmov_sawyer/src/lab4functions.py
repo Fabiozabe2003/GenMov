@@ -13,6 +13,13 @@ def dh(d, theta, a, alpha):
     return T
     
     
+def fkine_sawyer_codo(q):
+    T1 = dh(0.317,      q[0],          0.081,  -pi/2)
+    T2 = dh(0.194,      q[1]+3*pi/2,   0,      -pi/2)
+    T3 = dh(0.4,        q[2],          0,      -pi/2)
+    T4 = dh(0.1685,     q[3]+pi,       0,      -pi/2)
+    T=T1@T2@T3#@T4
+    return T
 
 def fkine_sawyer(q):
     """
@@ -31,6 +38,31 @@ def fkine_sawyer(q):
     T = T1@T2@T3@T4@T5@T6@T7
     return T
 
+def jacobian_sawyer_codo(q, delta=0.0001):
+    """
+    Jacobiano analitico para la posicion. Retorna una matriz de 3x7 y toma como
+    entrada el vector de configuracion articular q=[q1, q2, q3, q4, q5, q6, q7]
+    """
+    # Crear una matriz 3x7
+    J = np.zeros((3,7))
+    # Calcuar la transformacion homogenea inicial (usando q)
+    T = fkine_sawyer_codo(q)
+    
+    # Iteracion para la derivada de cada articulacion (columna)
+    for i in range(7):
+        # Copiar la configuracion articular inicial
+        dq = copy(q)
+
+        # Calcular nuevamenta la transformacion homogenea e
+        # Incrementar la articulacion i-esima usando un delta
+        dq[i] += delta
+
+        # Transformacion homogenea luego del incremento (q+delta)
+        T_inc = fkine_sawyer_codo(dq)
+
+        # Aproximacion del Jacobiano de posicion usando diferencias finitas
+        J[0:3,i]=(T_inc[0:3,3]-T[0:3,3])/delta
+    return J
 
 def jacobian_sawyer(q, delta=0.0001):
     """
@@ -41,12 +73,12 @@ def jacobian_sawyer(q, delta=0.0001):
     J = np.zeros((3,7))
     # Calcuar la transformacion homogenea inicial (usando q)
     T = fkine_sawyer(q)
-
     
     # Iteracion para la derivada de cada articulacion (columna)
     for i in range(7):
         # Copiar la configuracion articular inicial
         dq = copy(q)
+
         # Calcular nuevamenta la transformacion homogenea e
         # Incrementar la articulacion i-esima usando un delta
         dq[i] += delta
@@ -54,10 +86,8 @@ def jacobian_sawyer(q, delta=0.0001):
         # Transformacion homogenea luego del incremento (q+delta)
         T_inc = fkine_sawyer(dq)
 
-
         # Aproximacion del Jacobiano de posicion usando diferencias finitas
         J[0:3,i]=(T_inc[0:3,3]-T[0:3,3])/delta
-    
     return J
 
 
