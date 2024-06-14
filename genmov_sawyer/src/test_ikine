@@ -19,7 +19,7 @@ if __name__ == '__main__':
     # Desired position
     xd = np.array([0.650, 0.0, 0.0])
     # Initial configuration
-    q0 = np.array([0.0, 2, 0.0, 0.6, 1.2, 0.0, 0.0])
+    q0 = np.array([0, 1.04, 0, 0.54, 0, 0.0, 0.0])
     # Inverse kinematics
     q = ikine_sawyer(xd, q0)
     
