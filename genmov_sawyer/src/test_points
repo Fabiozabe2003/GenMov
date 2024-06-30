@@ -23,20 +23,23 @@ if __name__ == '__main__':
 
     # Configuration
     #config="Circle2_Config1"
-    config="Levantar_Brazo"
-
+    #config="Levantar_Brazo"
+    config="Saludo"
+    #config="Dab"
+    #config="Flex"
+    
     # Load points and adjust according to configuration
-    hand_points = np.loadtxt(f'/home/andres/proy_ws/src/GenMov/genmov_sawyer/src/Sawyer_{config}/Sawyer_hand_points.txt', dtype=float) 
-    elbow_points = np.loadtxt(f'/home/andres/proy_ws/src/GenMov/genmov_sawyer/src/Sawyer_{config}/Sawyer_forearm_points.txt', dtype=float)   
-    person_hand_points = np.loadtxt(f'/home/andres/proy_ws/src/GenMov/genmov_sawyer/src/Sawyer_{config}/hand_points.txt', dtype=float) 
-    person_elbow_points = np.loadtxt(f'/home/andres/proy_ws/src/GenMov/genmov_sawyer/src/Sawyer_{config}/forearm_points.txt', dtype=float)
+    hand_points = np.loadtxt(f'/home/andres/proy_ws/src/GenMov/genmov_sawyer/src/Motions/Sawyer_{config}/Sawyer_hand_points.txt', dtype=float) 
+    elbow_points = np.loadtxt(f'/home/andres/proy_ws/src/GenMov/genmov_sawyer/src/Motions/Sawyer_{config}/Sawyer_forearm_points.txt', dtype=float)   
+    person_hand_points = np.loadtxt(f'/home/andres/proy_ws/src/GenMov/genmov_sawyer/src/Motions/Sawyer_{config}/hand_points.txt', dtype=float) 
+    person_elbow_points = np.loadtxt(f'/home/andres/proy_ws/src/GenMov/genmov_sawyer/src/Motions/Sawyer_{config}/forearm_points.txt', dtype=float)
     
     #Change axis of points
     orden = [2, 0, 1]
     person_hand_points = person_hand_points[:, orden]
     person_elbow_points = person_elbow_points[:, orden]
     
-    if config=="Levantar_Brazo":
+    if (config=="Levantar_Brazo" or config=="Saludo"):
         orden = [2, 0, 1]
         hand_points = hand_points[:, orden]
         elbow_points = elbow_points[:, orden]
@@ -45,7 +48,13 @@ if __name__ == '__main__':
         q0 = np.array([0.5, 0.56, -1.0, 0.42, 0.5, 0.0, 0.0])#Levantar brazo-1,0,1.13
     elif config=="Circle2_Config1":
         q0 = np.array([0.0, 0.2, 0.0, 0.2, 0.0, 0.0, 0.0])#Circulo
-        pass
+    else:
+        orden = [2, 0, 1]
+        hand_points = hand_points[:, orden]
+        elbow_points = elbow_points[:, orden]
+        hand_points[:,2] += 0.300
+        elbow_points[:,2] += 0.300
+        q0 = np.array([0.5, 0.56, -1.0, 0.42, 0, 0.0, 0.0])#Levantar brazo-1,0,1.13
         
     # Initial configuration
     #   have been moved to the config
@@ -81,7 +90,7 @@ if __name__ == '__main__':
     jstate.position = q_wh
     
     # Frequency (in Hz) and control period 
-    freq = 200; dt = 1.0/freq; rate = rospy.Rate(freq)
+    freq = 20; dt = 1.0/freq; rate = rospy.Rate(freq)
 
     # Initial joint configuration
     q = copy(q0)
@@ -103,7 +112,11 @@ if __name__ == '__main__':
             
         # Error
         error = x - xd; derror = -k*error
+        if it==0: dxd=0; dxde=0
+        else: dxd=(hand_points[it]-hand_points[it-1])/(3*dt); dxde=(elbow_points[it]-elbow_points[it-1])/(3*dt) #entre 2 y 4 
+
         error_elbow = x_elbow - xd_elbow; derror_elbow = -k2*error_elbow
+        
 
         # Append for figures
         x_actual.append(x[0].tolist()); y_actual.append(x[1].tolist()); z_actual.append(x[2].tolist())
@@ -126,7 +139,12 @@ if __name__ == '__main__':
         pseudoinverse_elbow = np.linalg.pinv(Jacobian_elbow@P1)
 
         # Control Law
-        dq = pseudoinverse.dot(derror) + pseudoinverse_elbow.dot(derror_elbow-Jacobian_elbow@pseudoinverse@derror)
+        #dq = pseudoinverse.dot(derror) #Solo mano
+        #dq = pseudoinverse.dot(derror) + pseudoinverse_elbow.dot(derror_elbow-Jacobian_elbow@pseudoinverse@derror)
+        #dq = pseudoinverse.dot(derror+dxd) #Mano con xd no cte
+        #dq = pseudoinverse.dot(derror+dxd) + pseudoinverse_elbow.dot(derror_elbow-Jacobian_elbow@pseudoinverse@(derror+dxd)) #Mano con xd no cte y codo xd cte
+        dq = pseudoinverse.dot(derror+dxd) + pseudoinverse_elbow.dot((derror_elbow+dxde)-Jacobian_elbow@pseudoinverse@(derror+dxd)) #Mano con xd no cte y codo xd no cte
+        
         q = q + dt*dq
         
          
