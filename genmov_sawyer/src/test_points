@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+import rospy
+from sensor_msgs.msg import JointState
+from markers import *
+from lab4functions import *
+from figures import *
+import matplotlib.pyplot as plt
+
+if __name__ == '__main__':
+    # Initialize the node
+    rospy.init_node("testControlPoints")
+    print('starting motion ... ')
+    # Publisher: publish to the joint_states topic
+    pub = rospy.Publisher('joint_states', JointState, queue_size=10)
+ 
+    # Markers for the current and desired positions
+    bmarker_current  = BallMarker(color['RED'])
+    bmarker_desired = BallMarker(color['GREEN'])
+    bmarker_desired_elbow = BallMarker(color['BLUE'])
+
+     # Joint names
+    jnames = ("head_pan", "right_j0", "right_j1", "right_j2", "right_j3","right_j4", "right_j5", "right_j6")
+
+    # Configuration
+    #config="Circle2_Config1"
+    config="Levantar_Brazo"
+
+    # Load points and adjust according to configuration
+    hand_points = np.loadtxt(f'/home/andres/proy_ws/src/GenMov/genmov_sawyer/src/Sawyer_{config}/Sawyer_hand_points.txt', dtype=float) 
+    elbow_points = np.loadtxt(f'/home/andres/proy_ws/src/GenMov/genmov_sawyer/src/Sawyer_{config}/Sawyer_forearm_points.txt', dtype=float)   
+    person_hand_points = np.loadtxt(f'/home/andres/proy_ws/src/GenMov/genmov_sawyer/src/Sawyer_{config}/hand_points.txt', dtype=float) 
+    person_elbow_points = np.loadtxt(f'/home/andres/proy_ws/src/GenMov/genmov_sawyer/src/Sawyer_{config}/forearm_points.txt', dtype=float)
+    
+    #Change axis of points
+    orden = [2, 0, 1]
+    person_hand_points = person_hand_points[:, orden]
+    person_elbow_points = person_elbow_points[:, orden]
+    
+    if config=="Levantar_Brazo":
+        orden = [2, 0, 1]
+        hand_points = hand_points[:, orden]
+        elbow_points = elbow_points[:, orden]
+        hand_points[:,2] += 0.300
+        elbow_points[:,2] += 0.300
+        q0 = np.array([0.5, 0.56, -1.0, 0.42, 0.5, 0.0, 0.0])#Levantar brazo-1,0,1.13
+    elif config=="Circle2_Config1":
+        q0 = np.array([0.0, 0.2, 0.0, 0.2, 0.0, 0.0, 0.0])#Circulo
+        pass
+        
+    # Initial configuration
+    #   have been moved to the config
+
+    # Desired initial position
+    it=0
+    xd = hand_points[it]
+    xd_elbow = elbow_points[it]
+
+    # Resulting initial position (end effector with respect to the base link)
+    T = fkine_sawyer(q0); x0 = T[0:3,3]
+
+    # Red marker shows the achieved position
+    bmarker_current.xyz(x0)
+    # Green marker shows the desired position
+    bmarker_desired.xyz(xd); bmarker_desired_elbow.xyz(xd_elbow)
+
+    # Initializing for plotting
+    x_actual=[]; y_actual=[]; z_actual=[]
+    x_deseado=[]; y_deseado=[]; z_deseado=[]
+    x_error=[]; y_error=[]; z_error=[]
+    q_plot=[]
+
+    # Instance of the JointState message
+    jstate = JointState()
+    # Values of the message
+    jstate.header.stamp = rospy.Time.now()
+    jstate.name = jnames
+
+    # Add the head joint value (with value 0) to the joints
+    q0[3]=-q0[3]
+    q_wh=np.append(0.0,q0)
+    jstate.position = q_wh
+    
+    # Frequency (in Hz) and control period 
+    freq = 200; dt = 1.0/freq; rate = rospy.Rate(freq)
+
+    # Initial joint configuration
+    q = copy(q0)
+
+    # k for hand and elbow
+    k = 0.8; k2 = 0.8
+
+    # Main loop
+    while not rospy.is_shutdown():
+        # Current time (needed for ROS)
+        jstate.header.stamp = rospy.Time.now()
+        
+        # Invert due to model
+        q[3]=-q[3]
+
+        # Transform and position
+        T = fkine_sawyer(q); x = T[0:3,3]
+        T2 = fkine_sawyer_codo(q); x_elbow = T2[0:3,3]
+            
+        # Error
+        error = x - xd; derror = -k*error
+        error_elbow = x_elbow - xd_elbow; derror_elbow = -k2*error_elbow
+
+        # Append for figures
+        x_actual.append(x[0].tolist()); y_actual.append(x[1].tolist()); z_actual.append(x[2].tolist())
+        x_deseado.append(xd[0].tolist()); y_deseado.append(xd[1].tolist()); z_deseado.append(xd[2].tolist())    
+        x_error.append(error[0].tolist()); y_error.append(error[1].tolist()); z_error.append(error[2].tolist())
+        q_plot.append(q.tolist())
+        
+        # Jacobian of robot hand and elbow
+        Jacobian=jacobian_sawyer(q)
+        Jacobian_elbow=jacobian_sawyer_codo(q)
+        
+        # Singularity
+        if np.linalg.det(Jacobian@Jacobian.T ) < 0.0001:
+            print("singularidad !")
+            break
+
+        # Moore-Penrose Pseudoinverse 
+        pseudoinverse = np.linalg.pinv(Jacobian)
+        P1 = np.eye(7) - pseudoinverse@Jacobian
+        pseudoinverse_elbow = np.linalg.pinv(Jacobian_elbow@P1)
+
+        # Control Law
+        dq = pseudoinverse.dot(derror) + pseudoinverse_elbow.dot(derror_elbow-Jacobian_elbow@pseudoinverse@derror)
+        q = q + dt*dq
+        
+         
+        # Publish the message
+        q[3]=-q[3]
+        q_wh=np.append(0.0,q); jstate.position = q_wh
+        pub.publish(jstate)
+
+        #Update markers
+        bmarker_desired.xyz(xd); bmarker_current.xyz(x); bmarker_desired_elbow.xyz(xd_elbow)
+
+        # Comparison with desired point
+        if (np.linalg.norm(error) < 0.03): #Tune value
+            print("Iteración ",it," completa")
+            if it==len(hand_points)-1: break
+            it+=1
+            xd = hand_points[it]
+            xd_elbow = elbow_points[it]
+
+        # Wait for the next iteration
+        rate.sleep()
+
+    print('ending motion ...')
+    figures(person_hand_points[:,0],x_actual,x_error,x_deseado,person_hand_points[:,1],y_actual,y_error,y_deseado,person_hand_points[:,2],z_actual,z_error,z_deseado,q_plot)
