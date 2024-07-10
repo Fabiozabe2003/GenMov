@@ -34,7 +34,7 @@ if __name__ == '__main__':
     # Initial configuration
     q0 = np.array([2.96, 1.63, 0.29, 0.53 , 3.14, 0.08])
     #q0 = np.array([2.96,1.63,0.23,-1.63,-3.14,0.9])
-    #q0 = ikine_ur5(handpoints[0], q0)
+    q0 = ikine_ur5(handpoints[0], q0)
    
 
     # Initializing for plotting
@@ -58,8 +58,8 @@ if __name__ == '__main__':
     rate = rospy.Rate(freq)
     # Initial joint configuration
     q = copy(q0)
-    k1 = 1.5
-    k2 = 1.5
+    k1 = 0.8
+    k2 = 0.02
 
     for i in range(len(handpoints)):
         xd_hand = handpoints[i]
@@ -97,9 +97,10 @@ if __name__ == '__main__':
 
 
             # Jacobian of robot and Jacobian until elbow
-            Jacobian = jacobian_ur5(q,dt)
-            Jacobian_elbow = jacobian_ur5_codo(q,dt)
+            Jacobian = jacobian_ur5(q)
+            Jacobian_elbow = jacobian_ur5_codo(q)
     
+        
 
             if np.linalg.det(Jacobian @ Jacobian.T) < 0.0001:
                print("singularity detected!")
@@ -111,9 +112,9 @@ if __name__ == '__main__':
             pinv_elbow = np.linalg.pinv(Jacobian_elbow@P1)
 
             # Control Law
-            #dq =    pinv.dot(derror) + pinv_elbow.dot(derror_elbow-Jacobian_elbow@pinv@derror) # Mano y codo, xd cte
+            dq =    pinv.dot(derror) + pinv_elbow.dot(derror_elbow-Jacobian_elbow@pinv@derror) # Mano y codo, xd cte
             #dq = np.linalg.pinv(Jacobian).dot(derror) # Mano, xd cte
-            dq = np.linalg.pinv(Jacobian).dot(derror + dxd) # Mano,xd cambiante
+            #dq = np.linalg.pinv(Jacobian).dot(derror + dxd) # Mano,xd cambiante
             #dq =    pinv.dot(derror+ dxd) + pinv_elbow.dot((derror_elbow+dxde)-Jacobian_elbow@pinv@(derror+ dxd)) # Mano y codo, xd cte
             q = q + dt*dq
 
@@ -127,7 +128,7 @@ if __name__ == '__main__':
             bmarker_desired_elbow.xyz(xd_elbow)
             bmarker_current_elbow.xyz(x_elbow)
 
-            if np.linalg.norm(error) < 0.05:
+            if np.linalg.norm(error) < 0.04:
                 reached = True
                 print("Point reached")
 
