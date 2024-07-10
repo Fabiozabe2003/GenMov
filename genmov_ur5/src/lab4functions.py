@@ -14,6 +14,20 @@ def dh(d, theta, a, alpha):
     
     
 
+def fkine_ur5_codo(q):
+    # Matrices DH (completar), emplear la funcion dh con los parametros DH para cada articulacion
+    T1 = dh(0.089, q[0],0,pi/2) # confirmado
+    T2 = dh(0, q[1],-0.425,0) # esconocido
+    T3 = dh(0, q[2],-0.392,0)  # confirmado
+    T4 = dh(0.109, q[3] + pi,0,-pi/2)
+    T5 = dh(0.0945, q[4],0,pi/2)
+    T6 = dh(0.0823, q[5],0,0)
+    
+    # Efector final con respecto a la base
+    T = T1@T2
+    return T
+
+
 def fkine_ur5(q):
     """
     Calcular la cinematica directa del robot UR5 dados sus valores articulares. 
@@ -59,6 +73,32 @@ def jacobian_ur5(q, delta=0.0001):
         # Aproximacion del Jacobiano de posicion usando diferencias finitas
         J[0:3,i]=(T_inc[0:3,3]-T[0:3,3])/delta
     return J
+
+def jacobian_ur5_codo(q, delta=0.0001):
+    """
+    Jacobiano analitico para la posicion. Retorna una matriz de 3x6 y toma como
+    entrada el vector de configuracion articular q=[q1, q2, q3, q4, q5, q6]
+    """
+    # Crear una matriz 3x2
+    J = np.zeros((3,6))
+    # Calcuar la transformacion homogenea inicial (usando q)
+    T = fkine_ur5_codo(q)
+
+    # Iteracion para la derivada de cada articulacion (columna)
+    for i in range(6):
+        # Copiar la configuracion articular inicial
+        dq = copy(q)
+        # Calcular nuevamenta la transformacion homogenea e
+        # Incrementar la articulacion i-esima usando un delta
+        dq[i] += delta
+
+        # Transformacion homogenea luego del incremento (q+delta)
+        T_inc = fkine_ur5_codo(dq)
+
+        # Aproximacion del Jacobiano de posicion usando diferencias finitas
+        J[0:3,i]=(T_inc[0:3,3]-T[0:3,3])/delta
+    return J
+
 
 
 def ikine_ur5(xdes, q0):

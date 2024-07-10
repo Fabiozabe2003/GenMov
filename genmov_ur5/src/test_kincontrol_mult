@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+import rospy
+from sensor_msgs.msg import JointState
+from markers import *
+from lab4functions import *
+from figures import *
+import numpy as np
+from copy import copy
+
+if __name__ == '__main__':
+    # Initialize the node
+    rospy.init_node("testKineControlPosition")
+    print('starting motion ... ')
+
+    # Publisher: publish to the joint_states topic
+    pub = rospy.Publisher('joint_states', JointState, queue_size=10)
+ 
+    # Markers for the current and desired positions
+    bmarker_current  = BallMarker(color['RED'])
+    bmarker_desired = BallMarker(color['GREEN'])
+    bmarker_current_elbow  = BallMarker(color['RED'])
+    bmarker_desired_elbow = BallMarker(color['GREEN'])
+  
+
+    # Joint names
+    jnames = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
+
+     # Gets points
+    handpoints = np.loadtxt("/home/fabiozabe/proy_ws/src/GenMov/genmov_ur5/src/ur5_hand_points.txt", dtype=float) #poner ruta
+    elbowpoints = np.loadtxt("/home/fabiozabe/proy_ws/src/GenMov/genmov_ur5/src/ur5_forearm_points.txt", dtype=float) #poner ruta
+    person_hand_points = np.loadtxt("/home/fabiozabe/proy_ws/src/GenMov/genmov_ur5/src/person_hand_points.txt", dtype=float) #poner ruta
+ 
+
+    # Initial configuration
+    q0 = np.array([2.96, 1.63, 0.29, 0.53 , 3.14, 0.08])
+    #q0 = np.array([2.96,1.63,0.23,-1.63,-3.14,0.9])
+    q0 = ikine_ur5(handpoints[0], q0)
+   
+
+    # Initializing for plotting
+    x_actual=[]; y_actual=[]; z_actual=[]
+    x_deseado=[]; y_deseado=[]; z_deseado=[]
+    x_error=[]; y_error=[]; z_error=[]
+    q_plot=[]
+    
+
+    
+    # Instance of the JointState message
+    jstate = JointState()
+    jstate.header.stamp = rospy.Time.now()
+    jstate.name = jnames
+    jstate.position = q0
+    
+
+    # Frequency (in Hz) and control period 
+    freq = 20
+    dt = 1.0 / freq
+    rate = rospy.Rate(freq)
+    # Initial joint configuration
+    q = copy(q0)
+    k1 = 0.8
+    k2 = 0.02
+
+    for i in range(len(handpoints)):
+        xd_hand = handpoints[i]
+        xd_elbow = elbowpoints[i]
+        reached = False
+        while not rospy.is_shutdown() and not reached:
+            jstate.header.stamp = rospy.Time.now()
+
+            # Kinematic control law for position
+            T = fkine_ur5(q)
+            x = T[0:3,3]
+            T2 = fkine_ur5_codo(q)
+            x_elbow = T2[0:3,3]
+            
+            if i==0: 
+                dxd=0
+                dxde=0
+            else: 
+                dxd=(handpoints[i]-handpoints[i-1])/(3*dt)
+                dxde=(elbowpoints[i]-elbowpoints[i-1])/(3*dt) #entre 2 y 4
+
+
+            # Error
+            error = x - xd_hand
+            derror = -k1 * error
+            error_elbow = x_elbow - xd_elbow
+            derror_elbow = -k2 * error_elbow
+
+
+            # Append for figures
+            x_actual.append(x[0].tolist()); y_actual.append(x[1].tolist()); z_actual.append(x[2].tolist())
+            x_deseado.append(xd_hand[0].tolist()); y_deseado.append(xd_hand[1].tolist()); z_deseado.append(xd_hand[2].tolist())    
+            x_error.append(error[0].tolist()); y_error.append(error[1].tolist()); z_error.append(error[2].tolist())
+            q_plot.append(q.tolist())
+
+
+            # Jacobian of robot and Jacobian until elbow
+            Jacobian = jacobian_ur5(q)
+            Jacobian_elbow = jacobian_ur5_codo(q)
+    
+        
+
+            if np.linalg.det(Jacobian @ Jacobian.T) < 0.0001:
+               print("singularity detected!")
+               break
+
+            # Moore-Penrose Pseudoinverse 
+            pinv = np.linalg.pinv(Jacobian)
+            P1 = np.eye(6) -  pinv@Jacobian
+            pinv_elbow = np.linalg.pinv(Jacobian_elbow@P1)
+
+            # Control Law
+            dq =    pinv.dot(derror) + pinv_elbow.dot(derror_elbow-Jacobian_elbow@pinv@derror) # Mano y codo, xd cte
+            #dq = np.linalg.pinv(Jacobian).dot(derror) # Mano, xd cte
+            #dq = np.linalg.pinv(Jacobian).dot(derror + dxd) # Mano,xd cambiante
+            #dq =    pinv.dot(derror+ dxd) + pinv_elbow.dot((derror_elbow+dxde)-Jacobian_elbow@pinv@(derror+ dxd)) # Mano y codo, xd cte
+            q = q + dt*dq
+
+            # Publish the message
+            jstate.position = q
+            pub.publish(jstate) 
+ 
+            # Markers to follow elbow and hand control
+            bmarker_desired.xyz(xd_hand)
+            bmarker_current.xyz(x)
+            bmarker_desired_elbow.xyz(xd_elbow)
+            bmarker_current_elbow.xyz(x_elbow)
+
+            if np.linalg.norm(error) < 0.04:
+                reached = True
+                print("Point reached")
+
+            # Wait for the next iteration
+            rate.sleep()
+
+    print('ending motion ...')
+    figures(person_hand_points[:,0],x_actual,x_error,x_deseado,person_hand_points[:,1],y_actual,y_error,y_deseado,person_hand_points[:,2],z_actual,z_error,z_deseado,q_plot)
