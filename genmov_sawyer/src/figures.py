@@ -16,10 +16,11 @@ def figures(x_real,x_actual,x_error,x_deseado,y_real,y_actual,y_error,y_deseado,
         axs[0].plot(iteracion, x_error, label='Absolute error in X axis', color='red')
         axs[0].grid(True)
         axs[0].axhline(0, color='black', linewidth=0.7)
-        axs[0].set_title('Current X vs Desired X')
+        #axs[0].set_title('Current X vs Desired X')
         #axs[0].set_xlabel('Iteration')
         axs[0].set_ylabel('Position in X axis')
         axs[0].legend()
+        axs[0].set_xlim(0,len(iteracion)-1)
 
         # Subplot for Y axis
         axs[1].plot(iteracion, y_actual, label='Current Y')
@@ -27,10 +28,11 @@ def figures(x_real,x_actual,x_error,x_deseado,y_real,y_actual,y_error,y_deseado,
         axs[1].plot(iteracion, y_error, label='Absolute error in Y axis', color='red')
         axs[1].grid(True)
         axs[1].axhline(0, color='black', linewidth=0.7)
-        axs[1].set_title('Current Y vs Desired Y')
+        #axs[1].set_title('Current Y vs Desired Y')
         #axs[1].set_xlabel('Iteration')
         axs[1].set_ylabel('Position in Y axis')
         axs[1].legend()
+        axs[1].set_xlim(0,len(iteracion)-1)
 
         # Subplot for Z axis
         axs[2].plot(iteracion, z_actual, label='Current Z')
@@ -38,28 +40,33 @@ def figures(x_real,x_actual,x_error,x_deseado,y_real,y_actual,y_error,y_deseado,
         axs[2].plot(iteracion, z_error, label='Absolute error in Z axis', color='red')
         axs[2].grid(True)
         axs[2].axhline(0, color='black', linewidth=0.7)
-        axs[2].set_title('Current Z vs Desired Z')
+        #axs[2].set_title('Current Z vs Desired Z')
         axs[2].set_xlabel('Iteration')
         axs[2].set_ylabel('Position in Z axis')
         axs[2].legend()
+        axs[2].set_xlim(0,len(iteracion)-1)
+
+        #plt.figtext(0.5, 0.96, 'Overall Control Position Analysis', fontsize=20, ha='center', va='center')
 
 
         plt.figure(2)
         plt.plot(iteracion,q_plot, label=['q0', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6'])
-        plt.title('q en el tiempo')
+        #plt.title('Articular configuration evolution')
         plt.xlabel('Iteration')
-        plt.ylabel('Ángulo (rad)')
-        plt.legend()
+        plt.ylabel('Angular position (rad)')
+        plt.legend(loc='upper right')
+        plt.xlim(0,len(iteracion)-1)
 
         fig = plt.figure(3)
         ax = fig.add_subplot(111, projection='3d')
-        ax.plot(x_actual, y_actual, z_actual, label='Performed robotic trajectory')
+        ax.plot(x_real,y_real, z_real, label='Human character trajectory')
         ax.plot(x_deseado,y_deseado, z_deseado, label='Desired robotic trajectory')
-        ax.plot(x_real,y_real, z_real, label='Human trajectory')
+        ax.plot(x_actual, y_actual, z_actual, label='Performed robotic trajectory')
         ax.set_xlabel('X')
         ax.set_ylabel('Y')
         ax.set_zlabel('Z')
         ax.legend()
+        #plt.figtext(0.5, 0.96, 'Human Character, Desired Robotic and Performed Robotic Hand Trajectories', fontsize=15, ha='center', va='center')
 
 
         

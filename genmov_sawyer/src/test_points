@@ -23,11 +23,11 @@ if __name__ == '__main__':
 
     # Configuration
     #config="Sawyer_Circle2_Config1"
-    #config="Sawyer_Levantar_Brazo"
+    config="Sawyer_Levantar_Brazo"
     #config="Sawyer_Saludo"
     #config="Sawyer_Dab"
     #config="Sawyer_Flex"
-    config="prueba_flavio"
+    #config="prueba_flavio"
     
     # Load points and adjust according to configuration
     hand_points = np.loadtxt(f'/home/andres/proy_ws/src/GenMov/genmov_sawyer/src/Motions/{config}/Sawyer_hand_points.txt', dtype=float) 
@@ -40,22 +40,12 @@ if __name__ == '__main__':
     person_hand_points = person_hand_points[:, orden]
     person_elbow_points = person_elbow_points[:, orden]
     
-    if (config=="Levantar_Brazo" or config=="Saludo"):
-        orden = [2, 0, 1]
-        hand_points = hand_points[:, orden]
-        elbow_points = elbow_points[:, orden]
-        hand_points[:,2] += 0.300
-        elbow_points[:,2] += 0.300
-        q0 = np.array([0.5, 0.56, -1.0, 0.42, 0.5, 0.0, 0.0])#Levantar brazo-1,0,1.13
-    elif config=="Circle2_Config1":
-        q0 = np.array([0.0, 0.2, 0.0, 0.2, 0.0, 0.0, 0.0])#Circulo
-    else:
-        orden = [2, 0, 1]
-        hand_points = hand_points[:, orden]
-        elbow_points = elbow_points[:, orden]
-        hand_points[:,2] += 0.300
-        elbow_points[:,2] += 0.300
-        q0 = np.array([0.5, 0.56, -1.0, 0.42, 0, 0.0, 0.0])#Levantar brazo-1,0,1.13
+    orden = [2, 0, 1]
+    hand_points = hand_points[:, orden]
+    elbow_points = elbow_points[:, orden]
+    hand_points[:,2] += 0.300
+    elbow_points[:,2] += 0.300
+    q0 = np.array([0.5, 0.56, -1.0, 0.42, 0, 0.0, 0.0])#Levantar brazo-1,0,1.13
         
     q0 = ikine_sawyer(hand_points[0], q0)
     # Initial configuration
