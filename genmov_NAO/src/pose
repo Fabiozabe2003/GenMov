@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+import rospy
+from sensor_msgs.msg import JointState
+from markers import *
+from nao_functions import *
+
+if __name__ == '__main__':
+    # Initialize the node
+    rospy.init_node("NAO_pose")
+    # Publisher: publish to the joint_states topic
+    pub = rospy.Publisher('joint_states', JointState, queue_size=10)
+    
+
+    # Instance of the JointState message
+    jstate = JointState()
+    
+     # Joint names
+    jnames = (
+    "HeadYaw","HeadPitch",
+    "LHipYawPitch","LHipRoll","LHipPitch","LKneePitch","LAnklePitch","LAnkleRoll",
+    "RHipYawPitch","RHipRoll","RHipPitch","RKneePitch","RAnklePitch","RAnkleRoll",
+    "LShoulderPitch","LShoulderRoll","LElbowYaw","LElbowRoll","LWristYaw","LHand",
+    "RShoulderPitch","RShoulderRoll","RElbowYaw","RElbowRoll","RWristYaw","RHand",
+    "RFinger23","RFinger13","RFinger12",
+    "LFinger21","LFinger13","LFinger11",
+    "RFinger22","LFinger22","RFinger21","LFinger12","RFinger11","LFinger23",
+    "LThumb1","RThumb1","RThumb2","LThumb2")
+
+    # Values of the message
+    jstate.header.stamp = rospy.Time.now()
+    jstate.name = jnames
+    q = [0.0, 0.0, 
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.5 , 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0]
+    jstate.position = q
+
+
+    # Desired point
+    xd=[0,0.2,0]
+    bmarker_desired_point =  BallMarker(color['BLUE'])
+    bmarker_desired_point.xyz(xd)
+
+    # Left arm
+    q_left_arm=q[14:20]
+    T=fkine_left_arm(q_left_arm)
+    x_left_arm = T[0:3,3]
+    bmarker_left_arm  = BallMarker(color['RED'])
+    bmarker_left_arm.xyz(x_left_arm)
+
+
+
+    # Inverse Kinematics for left arm
+    #q_left_arm=ikine_left_arm(xd,q_left_arm)
+    #q[14:20]=q_left_arm        
+    """
+    # Head
+    print(q[0:2])
+    T=fkine_head(q[0:2])
+    x_head=T[0:3,3]
+    bmarker_head    = BallMarker(color['YELLOW'])
+    bmarker_head.xyz(x_head)
+    """
+    # Frequency (in Hz) and control period 
+    freq = 20; dt = 1.0/freq; rate = rospy.Rate(freq)
+    # Main loop
+    while not rospy.is_shutdown():
+        jstate.header.stamp = rospy.Time.now()        
+        jstate.position = q
+        pub.publish(jstate)
+
+        T=fkine_left_arm(q_left_arm)
+        x_left_arm = T[0:3,3]
+        bmarker_left_arm.xyz(x_left_arm)
+
+
+
+
+        print("Pose")
+        rate.sleep()
+        
