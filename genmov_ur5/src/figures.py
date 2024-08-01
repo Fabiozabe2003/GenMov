@@ -47,11 +47,12 @@ def figures(x_real,x_actual,x_error,x_deseado,y_real,y_actual,y_error,y_deseado,
 
 
         plt.figure(2)
-        plt.plot(iteracion,q_plot, label=['q0', 'q1', 'q2', 'q3', 'q4', 'q5', 'q6'])
+        plt.plot(iteracion, q_plot)
         plt.title('q en el tiempo')
         plt.xlabel('Iteration')
         plt.ylabel('Ángulo (rad)')
-        plt.legend()
+        plt.legend(['q0', 'q1', 'q2', 'q3', 'q4', 'q5'])
+
 
         fig = plt.figure(3)
         ax = fig.add_subplot(111, projection='3d')

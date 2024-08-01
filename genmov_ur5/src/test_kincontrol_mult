@@ -96,7 +96,7 @@ if __name__ == '__main__':
             q_plot.append(q.tolist())
 
 
-            # Jacobian of robot and Jacobian until elbow
+            # Jacobian of robot and Jacob#ian until elbow
             Jacobian = jacobian_ur5(q)
             Jacobian_elbow = jacobian_ur5_codo(q)
     
@@ -112,9 +112,9 @@ if __name__ == '__main__':
             pinv_elbow = np.linalg.pinv(Jacobian_elbow@P1)
 
             # Control Law
-            dq =    pinv.dot(derror) + pinv_elbow.dot(derror_elbow-Jacobian_elbow@pinv@derror) # Mano y codo, xd cte
+            #dq =    pinv.dot(derror) + pinv_elbow.dot(derror_elbow-Jacobian_elbow@pinv@derror) # Mano y codo, xd cte
             #dq = np.linalg.pinv(Jacobian).dot(derror) # Mano, xd cte
-            #dq = np.linalg.pinv(Jacobian).dot(derror + dxd) # Mano,xd cambiante
+            dq = np.linalg.pinv(Jacobian).dot(derror + dxd) # Mano,xd cambiante
             #dq =    pinv.dot(derror+ dxd) + pinv_elbow.dot((derror_elbow+dxde)-Jacobian_elbow@pinv@(derror+ dxd)) # Mano y codo, xd cte
             q = q + dt*dq
 
