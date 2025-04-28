@@ -56,21 +56,59 @@ def fkine_head(q):
 # DH brazo izquierdo
 def fkine_left_arm(q):
     #DH: A simple and fast ...
-    """
-    T0 = Trasl(0,0.098,0.1) #Torso to LShoulderPitch
-    T1 = dh(0.0,        q[1],           0,      pi/2)   #LShoulderPitch to LShoulderRoll
-    T2 = dh(0.0,        -q[0] + pi/2,    0.015,  pi/2)   #LShoulderRoll to LElbowYaw
-    T3 = dh(0.105,      q[2] + pi,      0,      pi/2)   #LElbowYaw to LElbowRoll
-    T4 = dh(0.0,        -q[3] + pi,      0,      pi/2)   #LElbowRoll to LWristYaw
-    T5 = dh(0.055,      -q[4],           0,      0)      #LWristYaw to LHand
-    """
     
-    T0 = Trasl(0,   0.098,  0.1)                                #Torso to LShoulderPitch
+    T0 = Trasl(0,   0.098,  0.1)@Trotx(-pi/2)                          #Torso to LShoulderPitch
     T1 = dh(0,          q[0],           0,          pi/2)       #LShoulderPitch to LShoulderRoll
     T2 = dh(0,          q[1]+pi/2,      0.015,      pi/2)       #LShoulderRoll to LElbowYaw
     T3 = dh(0.105,      q[2]+pi,        0,          pi/2)       #LElbowYaw to LElbowRoll
     T4 = dh(0,          q[3]+pi,        0,          pi/2)       #LElbowRoll to LWristYaw
-    T5 = dh(0.05595,    q[4],           0,          0)          #LWristYaw to LHand
+    T5 = dh(0.05595 + 0.05775 ,    q[4],           0,          0)          #LWristYaw to LHand
+    
+
+    # Efector final con respecto a la base
+    T = T0@T1@T2@T3@T4@T5
+    return T
+
+# DH brazo derecho
+def fkine_right_arm(q):
+    #DH: A simple and fast ...
+        
+    T0 = Trasl(0,   -0.098,  0.1)@Trotx(-pi/2)                          #Torso to RShoulderPitch
+    T1 = dh(0,          q[0],           0,          pi/2)       #RShoulderPitch to RShoulderRoll
+    T2 = dh(0,          q[1]-pi/2,      0.015,      -pi/2)       #RShoulderRoll to RElbowYaw
+    T3 = dh(0.105,      q[2],        0,          pi/2)       #RElbowYaw to RElbowRoll
+    T4 = dh(0,          q[3]+pi,        0,          pi/2)       #RElbowRoll to RWristYaw
+    T5 = dh(0.05595 + 0.05775,    q[4],           0,          0)          #RWristYaw to RHand
+    
+
+    # Efector final con respecto a la base
+    T = T0@T1@T2@T3@T4@T5
+    return T
+
+def fkine_right_arm(q):
+    #DH: A simple and fast ...
+        
+    T0 = Trasl(0,   -0.098,  0.1)@Trotx(-pi/2)                          #Torso to RShoulderPitch
+    T1 = dh(0,          q[0],           0,          pi/2)       #RShoulderPitch to RShoulderRoll
+    T2 = dh(0,          q[1]-pi/2,      0.015,      -pi/2)       #RShoulderRoll to RElbowYaw
+    T3 = dh(0.105,      q[2],        0,          pi/2)       #RElbowYaw to RElbowRoll
+    T4 = dh(0,          q[3]+pi,        0,          pi/2)       #RElbowRoll to RWristYaw
+    T5 = dh(0.05595 + 0.05775,    q[4],           0,          0)          #RWristYaw to RHand
+    
+
+    # Efector final con respecto a la base
+    T = T0@T1@T2@T3@T4@T5
+    return T
+
+def fkine_right_elbow(q):
+    #DH: A simple and fast ...
+        
+    T0 = Trasl(0,   -0.098,  0.1)@Trotx(-pi/2)                          #Torso to RShoulderPitch
+    T1 = dh(0,          q[0],           0,          pi/2)       #RShoulderPitch to RShoulderRoll
+    T2 = dh(0,          q[1]-pi/2,      0.015,      -pi/2)       #RShoulderRoll to RElbowYaw
+    T3 = dh(0.105,      q[2],        0,          pi/2)       #RElbowYaw to RElbowRoll
+    T4 = dh(0,          q[3]+pi,        0,          pi/2)       #RElbowRoll to RWristYaw
+    T5 = dh(0.05595 + 0.05775,    q[4],           0,          0)          #RWristYaw to RHand
     
 
     # Efector final con respecto a la base
@@ -102,6 +140,60 @@ def jacobian_left_arm(q, delta=0.0001):
         # Aproximacion del Jacobiano de posicion usando diferencias finitas
         J[0:3,i]=(T_inc[0:3,3]-T[0:3,3])/delta
     return J
+
+
+def jacobian_right_arm(q, delta=1e-6):
+    """
+    Jacobiano analitico para la posicion. Retorna una matriz de 3x6 y toma como
+    entrada el vector de configuracion articular q=[q1, q2, q3, q4, q5, q6]
+    """
+    # Crear una matriz 3x5
+    J = np.zeros((3,5))
+    # Calcuar la transformacion homogenea inicial (usando q)
+    T = fkine_right_arm(q)
+    
+    # Iteracion para la derivada de cada articulacion (columna)
+    for i in range(5):
+        # Copiar la configuracion articular inicial
+        dq = copy(q)
+
+        # Calcular nuevamenta la transformacion homogenea e
+        # Incrementar la articulacion i-esima usando un delta
+        dq[i] += delta
+
+        # Transformacion homogenea luego del incremento (q+delta)
+        T_inc = fkine_right_arm(dq)
+
+        # Aproximacion del Jacobiano de posicion usando diferencias finitas
+        J[0:3,i]=(T_inc[0:3,3]-T[0:3,3])/delta
+    return J
+
+def jacobian_right_elbow(q, delta=1e-6):
+    """
+    Jacobiano analitico para la posicion. Retorna una matriz de 3x6 y toma como
+    entrada el vector de configuracion articular q=[q1, q2, q3, q4, q5, q6]
+    """
+    # Crear una matriz 3x5
+    J = np.zeros((3,5))
+    # Calcuar la transformacion homogenea inicial (usando q)
+    T = fkine_right_elbow(q)
+    
+    # Iteracion para la derivada de cada articulacion (columna)
+    for i in range(3):
+        # Copiar la configuracion articular inicial
+        dq = copy(q)
+
+        # Calcular nuevamenta la transformacion homogenea e
+        # Incrementar la articulacion i-esima usando un delta
+        dq[i] += delta
+
+        # Transformacion homogenea luego del incremento (q+delta)
+        T_inc = fkine_right_elbow(dq)
+
+        # Aproximacion del Jacobiano de posicion usando diferencias finitas
+        J[0:3,i]=(T_inc[0:3,3]-T[0:3,3])/delta
+    return J
+
 
 def ikine_left_arm(xdes, q0):
     """

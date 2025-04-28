@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+
+
+import rospy
+from naoqi_bridge_msgs.msg import JointAnglesWithSpeed
+
+def move_head_and_hand():
+    rospy.init_node('move_head_and_hand', anonymous=True)
+    
+    # Publicador al topic /joint_angles
+    pub = rospy.Publisher('/joint_angles', JointAnglesWithSpeed, queue_size=10)
+    rospy.sleep(1)  # Esperar un momento para asegurar que el publicador esté listo
+
+    # Crear el mensaje para mover la cabeza y la mano
+    msg = JointAnglesWithSpeed()
+    msg.joint_names = ["HeadYaw", "LHand"]  # Mover cabeza y mano izquierda
+    msg.joint_angles = [0.5, 0]  # 0.5 radianes para HeadYaw, 0.8 para LHand
+    msg.speed = 0.25  # Velocidad del movimiento (0.0 a 1.0)
+    msg.relative = False  # Movimiento absoluto
+
+    # Publicar el mensaje
+    rospy.loginfo("Publishing joint angles...")
+    pub.publish(msg)
+    rospy.sleep(1)  # Esperar a que el mensaje sea procesado
+
+if __name__ == "__main__":
+    try:
+        move_head_and_hand()
+    except rospy.ROSInterruptException:
+        pass

@@ -25,7 +25,7 @@ if __name__ == '__main__':
     # Joint names
     jnames = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_1_joint', 'wrist_2_joint', 'wrist_3_joint']
 
-     # Gets points
+     # Get points
     handpoints = np.loadtxt("/home/fabiozabe/proy_ws/src/GenMov/genmov_ur5/src/ur5_hand_points.txt", dtype=float) #poner ruta
     elbowpoints = np.loadtxt("/home/fabiozabe/proy_ws/src/GenMov/genmov_ur5/src/ur5_forearm_points.txt", dtype=float) #poner ruta
     person_hand_points = np.loadtxt("/home/fabiozabe/proy_ws/src/GenMov/genmov_ur5/src/person_hand_points.txt", dtype=float) #poner ruta
@@ -41,7 +41,7 @@ if __name__ == '__main__':
     x_actual=[]; y_actual=[]; z_actual=[]
     x_deseado=[]; y_deseado=[]; z_deseado=[]
     x_error=[]; y_error=[]; z_error=[]
-    q_plot=[]
+    q_plot=[]; xyz_error=[]
     
 
     
@@ -67,7 +67,6 @@ if __name__ == '__main__':
         reached = False
         while not rospy.is_shutdown() and not reached:
             jstate.header.stamp = rospy.Time.now()
-
             # Kinematic control law for position
             T = fkine_ur5(q)
             x = T[0:3,3]
@@ -93,6 +92,8 @@ if __name__ == '__main__':
             x_actual.append(x[0].tolist()); y_actual.append(x[1].tolist()); z_actual.append(x[2].tolist())
             x_deseado.append(xd_hand[0].tolist()); y_deseado.append(xd_hand[1].tolist()); z_deseado.append(xd_hand[2].tolist())    
             x_error.append(error[0].tolist()); y_error.append(error[1].tolist()); z_error.append(error[2].tolist())
+            xyz_error.append((np.sqrt( error[0]**2 + error[1]**2 + error[2]**2)).tolist())
+            #print(xyz_error[-1])
             q_plot.append(q.tolist())
 
 
@@ -136,4 +137,7 @@ if __name__ == '__main__':
             rate.sleep()
 
     print('ending motion ...')
-    figures(person_hand_points[:,0],x_actual,x_error,x_deseado,person_hand_points[:,1],y_actual,y_error,y_deseado,person_hand_points[:,2],z_actual,z_error,z_deseado,q_plot)
+    print("Error maximo:",max(xyz_error))
+    print("Error minimo:",min(xyz_error))
+    print("Error promedio:", sum(xyz_error)/len(xyz_error))
+    #figures(person_hand_points[:,0],x_actual,x_error,x_deseado,person_hand_points[:,1],y_actual,y_error,y_deseado,person_hand_points[:,2],z_actual,z_error,z_deseado,q_plot)

@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+import rospy
+from sensor_msgs.msg import JointState
+from markers import *
+from nao_functions import *
+
+if __name__ == '__main__':
+    # Initialize the node
+    rospy.init_node("NAO_kincontrol")
+    # Publisher: publish to the joint_states topic
+    pub = rospy.Publisher('joint_states', JointState, queue_size=10)
+    
+    # Instance of the JointState message
+    jstate = JointState()
+    
+     # Joint names
+    jnames = (
+    "HeadYaw","HeadPitch",
+    "LHipYawPitch","LHipRoll","LHipPitch","LKneePitch","LAnklePitch","LAnkleRoll",
+    "RHipYawPitch","RHipRoll","RHipPitch","RKneePitch","RAnklePitch","RAnkleRoll",
+    "LShoulderPitch","LShoulderRoll","LElbowYaw","LElbowRoll","LWristYaw","LHand",
+    "RShoulderPitch","RShoulderRoll","RElbowYaw","RElbowRoll","RWristYaw","RHand",
+    "RFinger23","RFinger13","RFinger12",
+    "LFinger21","LFinger13","LFinger11",
+    "RFinger22","LFinger22","RFinger21","LFinger12","RFinger11","LFinger23",
+    "LThumb1","RThumb1","RThumb2","LThumb2")
+
+
+    # Desired position
+    xd = np.array([0, -0.19, 0.23 ]) 
+    
+    # Initial configuration
+    jstate.header.stamp = rospy.Time.now()
+    jstate.name = jnames
+    q0 = [0.0, 0.0, 
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.1 ,0, 0.1, 0.1, 0.1, 0.1,
+    0 ,0.1, 0.1, 0.1, 0.1, 0.1,
+    0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0]
+    jstate.position = q0
+
+
+    # Markers for the current and desired positions
+    bmarker_right_arm  = BallMarker(color['RED'])
+    bmarker_desired = BallMarker(color['GREEN'])
+
+    #Resulting initial position
+    q_right_arm = q0[20:25]
+    T_right=fkine_right_arm(q_right_arm)
+    x_right_arm = T_right[0:3,3]
+
+
+    #Current and desired
+    bmarker_right_arm.xyz(x_right_arm)
+    bmarker_desired.xyz(xd)
+
+     # Frequency (in Hz) and control period 
+    freq = 200
+    dt = 1.0/freq
+    rate = rospy.Rate(freq)
+
+    # Initial joint configuration
+    q = copy(q0)
+    k = 2.5
+
+    # Main loop
+    while not rospy.is_shutdown():
+        # Current time (needed for ROS)
+        jstate.header.stamp = rospy.Time.now()
+        # Kinematic control law for position (complete here)
+        # -----------------------------
+        T = fkine_right_arm(q[20:25])
+        x = T[0:3,3]
+        error = x - xd
+        derror = -k*error
+        
+        Jacobian=jacobian_right_arm(q[20:25],dt)
+        if np.linalg.det(Jacobian@Jacobian.T) < 0.001:
+            print("singularidad !")
+            print(np.linalg.det(Jacobian@Jacobian.T))
+            #break
+        dq = np.linalg.pinv(Jacobian).dot(derror)
+        
+        for i in range(20,25):
+            q[i] += dt*dq[i-20]
+        
+        # Publish the message
+        jstate.position = q
+        pub.publish(jstate)
+        bmarker_desired.xyz(xd)
+        bmarker_right_arm.xyz(x)
+
+        if (np.linalg.norm(error) < 0.01):
+            break
+        # Wait for the next iteration
+        rate.sleep()
+
+    print('ending motion ...')

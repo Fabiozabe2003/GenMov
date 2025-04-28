@@ -1,0 +1,148 @@
+import casadi as ca
+from casadi import *
+from forward_kinematics import *
+from nao_functions import *
+from optimization import *
+from read_data import *
+import time
+import sys
+import qi
+import numpy as np
+from nao_skills import *
+import matplotlib.pyplot as plt
+
+
+
+start = time.time()
+
+reconstructed_data=reconstruct()
+left_hand_points=reconstructed_data["lhand"]
+right_hand_points=reconstructed_data["rhand"]
+left_elbow_points=reconstructed_data["lforearm"]
+right_elbow_points=reconstructed_data["rforearm"]
+N=len(left_hand_points)
+
+
+f=0
+q = MX.sym('q',6*N) # variable 'q'
+g=[]
+for i in range(N):
+    q_i=q[6 * i:6 * (i + 1)]
+    f += ca.sumsqr(ca.vertcat(*fkine_left_arm(q_i,'t')[0:3,3])-ca.vertcat(*left_hand_points[i])) + ca.sumsqr(ca.vertcat(*fkine_left_elbow(q_i,'t')[0:3,3])-ca.vertcat(*left_elbow_points[i]))
+    if i!=N-1: #evaluar
+        q_i_s=q[6 * (i+1):6 * (i + 2)]
+        g.append((q_i_s-q_i)/0.05) #revisar tipo de dato
+
+g_all=ca.vertcat(*g)
+nlp = {}
+nlp['x'] = q
+nlp['f'] = f
+nlp['g'] = g_all
+opts={"max_iter": 200}
+opts = {
+    'ipopt': {
+        'print_level': 0     # 0 = no iteration output
+    }
+}
+
+solver = nlpsol('solver','ipopt',nlp,opts)
+lbq=ca.repmat(q_min[14:20],N)
+ubq=ca.repmat(q_max[14:20],N)
+lbdq=ca.repmat(dq_min[14:20],N-1)
+ubdq=ca.repmat(dq_max[14:20],N-1)
+sol = solver(lbx=lbq, ubx=ubq, lbg=lbdq, ubg=ubdq)
+q_larm=sol['x'].reshape((6,N))
+
+# Right arm
+f=0
+q = MX.sym('q',6*N) # variable 'q'
+g=[]
+for i in range(N):
+    q_i=q[6 * i:6 * (i + 1)]
+    f += ca.sumsqr(ca.vertcat(*fkine_right_arm(q_i,'t')[0:3,3])-ca.vertcat(*right_hand_points[i])) + ca.sumsqr(ca.vertcat(*fkine_right_elbow(q_i,'t')[0:3,3])-ca.vertcat(*right_elbow_points[i]))
+    if i!=N-1: #evaluar
+        q_i_s=q[6 * (i+1):6 * (i + 2)]
+        g.append((q_i_s-q_i)/0.05) #revisar tipo de dato
+
+g_all=ca.vertcat(*g)
+nlp = {}
+nlp['x'] = q
+nlp['f'] = f
+nlp['g'] = g_all
+opts={"max_iter": 200}
+opts = {
+    'ipopt': {
+        'print_level': 0     # 0 = no iteration output
+    }
+}
+
+solver = nlpsol('solver','ipopt',nlp,opts)
+lbq=ca.repmat(q_min[20:26],N)
+ubq=ca.repmat(q_max[20:26],N)
+lbdq=ca.repmat(dq_min[20:26],N-1)
+ubdq=ca.repmat(dq_max[20:26],N-1)
+sol = solver(lbx=lbq, ubx=ubq, lbg=lbdq, ubg=ubdq)
+q_rarm=sol['x'].reshape((6,N))
+
+end = time.time()   
+print("Tiempo de optimización: ", end-start)
+
+
+# Main program begins
+def nao_trajectory():
+    robot_ip = "192.168.10.157"  # Replace with your robot's IP
+    robot_port = 9559
+
+    # Create an application instance
+    app = qi.Application(["NAOqiApp", f"--qi-url=tcp://{robot_ip}:{robot_port}"])
+    app.start()  # Start the application
+    session = app.session  # Get the session from the application
+    try:
+        print("Connected to the robot!")
+    except Exception as e:
+        print(f"Failed to connect to robot: {e}")
+    
+    finally:
+        # Close the Qi session properly
+        print("Closing Qi session...")
+        # Initialize the node
+        q_larm_a=np.array(q_larm[:,0].full().flatten())
+        q_rarm_a=np.array(q_rarm[:,0].full().flatten())
+        
+        joints_larm(session,q_larm_a.tolist())
+        joints_rarm(session,q_rarm_a.tolist())
+        for i in range(N):
+            q_larm_a=np.array(q_larm[:,i].full().flatten());q_rarm_a=np.array(q_rarm[:,i].full().flatten())
+            joints_larm(session,q_larm_a.tolist())
+            joints_rarm(session,q_rarm_a.tolist())
+
+        app.stop()
+
+
+
+if __name__ == '__main__': 
+    
+    num_joints, num_steps = q_rarm.shape
+    q_rarm = np.array(q_rarm)
+    plt.figure(figsize=(10, 6))
+    for i in range(num_joints):
+        plt.plot(q_rarm[i, :].flatten(), label=f'q{i+1}')
+    plt.title("Evolución de las articulaciones del brazo derecho")
+    plt.xlabel("Paso de tiempo")
+    plt.ylabel("Ángulo articular (rad)")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    q_larm = np.array(q_larm)
+    plt.figure(figsize=(10, 6))
+    for i in range(num_joints):
+        plt.plot(q_larm[i, :].flatten(), label=f'q{i+1}')
+    plt.title("Evolución de las articulaciones del brazo izquierdo")
+    plt.xlabel("Paso de tiempo")
+    plt.ylabel("Ángulo articular (rad)")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()

@@ -18,7 +18,7 @@ class BallMarker(object):
     """
     id = 0
 
-    def __init__(self, color, alpha=1.0, scale=0.05):
+    def __init__(self, color, alpha=1.0, scale=0.025):
         """
         The color can be specified as a list with 3 elements or as the color
         dictionary (e.g. BLUE, RED, etc). Alpha sets the transparency and scale
