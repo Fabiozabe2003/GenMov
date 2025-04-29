@@ -1,6 +1,6 @@
 import pandas as pd 
 
-df_read = pd.read_csv("/home/fabiozabe/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/motions/move_arms.csv")
+df_read = pd.read_csv("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/motions/move_arms.csv")
 #print("Read data:");print(df_read.head())
 
 def reconstruct():
