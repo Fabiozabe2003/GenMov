@@ -1,5 +1,5 @@
 import qi
-import cv2
+#import cv2
 import numpy as np
 #from ultralytics import YOLO
 from forward_kinematics import *

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-
 import casadi as ca
 from casadi import *
 from forward_kinematics import *
-from nao_functions import *
+from nao_dynamics import *
+from nao_jacobian import *
 from optimization import *
 from read_data import *
 import time
-import qi
 import numpy as np
 from nao_skills import *
 import matplotlib.pyplot as plt
@@ -17,7 +16,18 @@ import tf2_ros
 import geometry_msgs.msg
 from scipy.spatial.transform import Rotation as R
 
-start = time.time()
+
+# Matrices dinamicas
+model_path = "/home/invitado8/proy_ws/src/nao/nao_utec/urdf/"
+urdf_filename = "naoV40red.urdf"
+urdf_model_path = join(model_path, urdf_filename)
+
+model = pin.buildModelFromUrdf(urdf_model_path, pin.JointModelFreeFlyer())
+data = model.createData()
+M_din,b_din = dynamic_matrices_fun(model)
+dynamic_ddq = build_dynamic_ddq()
+Jacobian_contacts = build_Jacobian_contacts()
+
 
 reconstructed_data=reconstruct()
 left_hand_points=reconstructed_data["lhand"]
@@ -26,30 +36,33 @@ left_elbow_points=reconstructed_data["lforearm"]
 right_elbow_points=reconstructed_data["rforearm"]
 N=len(left_hand_points)
 
+
 joint_indices = {
-    "l_arm": slice(14, 20),
-    "r_arm": slice(20, 26),
-    "f_base": slice(26,32),
-    "l_leg": slice(2,8),
-    "r_leg": slice(8,14),
+    "l_arm": slice(14 + 6, 20 + 6),
+    "r_arm": slice(20 + 6 , 26 + 6),
+    "f_base": slice(0,6),
+    "l_leg": slice(2  + 6, 8 + 6),
+    "r_leg": slice(8 + 6, 14 +6),
 }
 
 
 
 Dof = 32 # 32 cuando agregue los 6 de la base lotante
 Dof_act = 26  #26 qs actuados
-#N = 80
-q = MX.sym('q',Dof*N) # variable 'q' de cuero completo
+N = 25
+q = MX.sym('q',Dof*N) # variable 'q' de cuerpo completo
 tau = MX.sym('tau',Dof_act*N)  # par para articulaciones actuadas
 f_contact = MX.sym('f_contact', 3*8*(N))  # fuerzas de contacto (4 por pie)
-S = ca.vertcat(ca.DM_eye(26), ca.DM.zeros(6, 26))  # Dimensión: 32x26
+S = ca.vertcat(ca.DM.zeros(6, 26), ca.DM_eye(26) )  # Dimensión: 32x26
 
+
+start = time.time()
 
 f=0 # costo
 dt = 0.05
-mu = 0.54 # inventado
+mu = 0.9 # inventado
 
-total_constraints = Dof_act*(N-1) + 12*(N) + 8*(N-1) #+ Dof*N
+total_constraints = Dof_act*(N-1) + 12*(N) + 8*(N-2) + Dof*(N-2)
 print("Restricciones de g:",total_constraints)
 
 lbg=[0]*total_constraints
@@ -78,10 +91,14 @@ for i in range(N):
     q_i_rarm =  q_i[joint_indices["r_arm"]]
     q_i_base = q_i[joint_indices["f_base"]]
 
-    f += ca.sumsqr(ca.vertcat(*fkine_left_arm(q_i_larm)[0:3,3])-ca.vertcat(*left_hand_points[i]))   # Mano izquierda
-    f +=  ca.sumsqr(ca.vertcat(*fkine_left_elbow(q_i_larm)[0:3,3])-ca.vertcat(*left_elbow_points[i]))  # Codo izquierdo
-    f += ca.sumsqr(ca.vertcat(*fkine_right_arm(q_i_rarm)[0:3,3])-ca.vertcat(*right_hand_points[i]))   # Mano derecha
-    f +=  ca.sumsqr(ca.vertcat(*fkine_right_elbow(q_i_rarm)[0:3,3])-ca.vertcat(*right_elbow_points[i]))  # Codo derecho
+
+    f += ca.sumsqr(ca.vertcat(*fkine_left_arm(q_i_larm)[0:3,3])-ca.vertcat(*left_hand_points[i + 75]))   # Mano izquierda
+    f +=  ca.sumsqr(ca.vertcat(*fkine_left_elbow(q_i_larm)[0:3,3])-ca.vertcat(*left_elbow_points[i + 75]))  # Codo izquierdo
+    f += ca.sumsqr(ca.vertcat(*fkine_right_arm(q_i_rarm)[0:3,3])-ca.vertcat(*right_hand_points[i + 75]))   # Mano derecha
+    f +=  ca.sumsqr(ca.vertcat(*fkine_right_elbow(q_i_rarm)[0:3,3])-ca.vertcat(*right_elbow_points[i + 75]))  # Codo derecho
+
+
+    #f += 10 * (q_i_base[3]**2 + q_i_base[4]**2)
 
     #' Restriccion phi(q) = 0
     q_i_lleg = q_i[joint_indices["l_leg"]]
@@ -134,45 +151,55 @@ for i in range(N):
         dq_i = (q_i1-q_i)/dt
 
         for j in range(Dof_act):
-            g[idx] = dq_i[j] 
+            g[idx] = dq_i[j + 6] 
             lbg[idx] = dq_min[j]
             ubg[idx] = dq_max[j]
             idx+=1
 
-        #Restriccion de fricción
+
+        # #Restriccion de fricción
         f_i = f_contact[24*i:24*(i+1)]
-        f += 1e-6* ca.dot(f_i, f_i)
-        for j in range(8):  # 8 puntos de contacto
-           fx = f_i[3*j + 0]
-           fy = f_i[3*j + 1]
-           fz = f_i[3*j + 2]
+
+
+        if i<N-2:
+            q_i2 = q[Dof*(i+2):Dof*(i+3)]
+            ddq_i = (q_i2 - 2*q_i1 + q_i)/ dt**2
+
+            rpy = q_i[3:6]
+            drpy = dq_i[3:6]
+            dyn_q = dynamic_q(q_i)
+            dyn_dq = dynamic_dq(q_i,rpy)
+            dyn_ddq = dynamic_ddq(rpy, drpy,ddq_i)
+
+            M_i =  M_din(dyn_q) #M(q_i1)
+            b_i = b_din(dyn_q,dyn_dq)
+            J_i = Jacobian_contacts(q_i)
+
+            tau_i = tau[Dof_act*i:Dof_act*(i+1)]
+            dyn = M_i@dyn_ddq + b_i - J_i.T@f_i - S@tau_i
+            #dyn = ca.mtimes(M_i, dyn_ddq) + b_i -  ca.mtimes(J_i.T, f_i) - ca.mtimes(S, tau_i)
+
+
+            for j in range(8):  # 8 puntos de contacto
+                fx = f_i[3*j + 0]
+                fy = f_i[3*j + 1]
+                fz = f_i[3*j + 2]
+
+                #f += 10* (fx**2 + fy**2)
+                #Friction cone constraint: mu^2 * fz^2 - fx^2 - fy^2 >= 0
+                g[idx] =  mu**2 * fz**2 - fx**2 - fy**2
+                lbg[idx] = 0
+                ubg[idx] = ca.inf
+                idx += 1
+
+
+            for j in range(Dof):
+                g[idx] = dyn[j]  
+                lbg[idx] = 0
+                ubg[idx] = 0
+                idx +=1
+
         
-            #Friction cone constraint: mu^2 * fz^2 - fx^2 - fy^2 >= 0
-           g[idx] = mu**2 * fz**2 - fx**2 - fy**2
-           lbg[idx] = 0.0
-           ubg[idx] = ca.inf
-           idx += 1
-
-        #if i<N-2:
-            #q_i2 = q[Dof*(i+2):Dof*(i+3)]
-            #ddq_i = (q_i2 - 2*q_i1 + q_i)/ dt**2
-
-            #M_i =   #M(q_i1)
-            #C_i =   #C(q_i1,dq_i)
-            #G_i =   #G(q_i1)
-            #J_i =   #Jacobiano_contactos(q_i1)
-
-            #tau_i = tau[Dof_act*i:Dof_act(i+1)]
-            #dyn = M_i @ ddq_i + C_i @ dq_i + G_i - J_i.T @ f_i - S @ tau_i
-
-
-            #for j in range(Dof):
-            #    g[idx] = dyn[j]  # Solo evaluamos dinámica en los actuados
-            #    lbg[idx] = 0
-            #    ubg[idx] = 0
-            #    idx +=1
-
-            # Queda restringir las uerzas
 
 print("IDX:",idx)
 g_all=ca.vertcat(*g)
@@ -181,14 +208,14 @@ nlp = {}
 nlp['x'] = ca.vertcat(q, tau, f_contact)
 nlp['f'] = f
 nlp['g'] = g_all
-opts={"max_iter": 200}
-opts = {
-    'ipopt': {
-        'print_level': 0     # 0 = no iteration output
-    }
-}
+opts={"max_iter_eig": 500}
+# opts = {
+#      'ipopt': {
+#          'print_level': 0     # 0 = no iteration output
+#      }
+#  }
 
-solver = nlpsol('solver','ipopt',nlp)
+solver = nlpsol('solver','ipopt',nlp,opts)
 
 lbq=ca.repmat(q_min,N)
 ubq=ca.repmat(q_max,N)
@@ -197,14 +224,14 @@ lbtau =ca.repmat(tau_min,N)
 ubtau = ca.repmat(tau_max,N)
 
 lbf = ca.repmat([-ca.inf]*3*8,N)
-ubf = ca.repmat([ca.inf ]*3*8,N)
+ubf = ca.repmat([ca.inf]*3*8,N)
 
 
 
-#data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/warmstart_brazos.npz")
+data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/warmstart_brazos.npz")
 
-#q_warm = data['q_full']
-#q0= q_warm.reshape((-1, 1))  # (Dof*N, 1)
+q_warm = data['q_full']
+q0= q_warm.reshape((-1, 1))  # (Dof*N, 1)
 
 q0 = np.zeros(Dof*N)
 tau0 = np.zeros(Dof_act*N)
@@ -218,13 +245,20 @@ sol = solver(x0 = x_init,
             lbg=lbg, ubg=ubg)
 
 
+end = time.time() 
+
 q_full= (sol['x'][:Dof * N]).reshape((Dof,N))
-fuerzas_resultado = (sol['x'][Dof*N + Dof_act*N:]).reshape((24,N))
-end = time.time()   
+tau_resultado = (sol['x'][Dof*N :(Dof+Dof_act)*N]).reshape((26,N))  
+tau_resultado = np.array(tau_resultado)
+
+for i in range (Dof_act):
+    print("TAU:", tau_resultado[i, :])
+    print("TAUmax:", np.max(abs(tau_resultado[i,:])))
+
 print("Tiempo de optimización: ", end-start)
 
 
-#np.savez("warmstart_brazos.npz", q_full=q_full)
+np.savez("warmstart_brazos.npz", q_full=q_full)
 
 
 def publish_tf(br, position, rpy, frame_id="world", child_frame_id="base_link"):
@@ -269,10 +303,9 @@ def send_joint_states(q_full, rate_hz= 20):
 
     for i in range(N):
 
-        pos = q_full[26:29, i]       # x, y, z
-        rpy = q_full[29:32, i]       # roll, pitch, yaw
-        print("xyz:",pos)
-        print("rpy:",rpy)
+        pos = q_full[0:3, i]       # x, y, z
+        rpy = q_full[3:6, i]       # roll, pitch, yaw
+        
 
         # Publica TF desde world → torso
         publish_tf(br, pos, rpy)
@@ -281,7 +314,7 @@ def send_joint_states(q_full, rate_hz= 20):
         jstate.header.stamp = rospy.Time.now()
         jstate.name = jnames
 
-        q_actuated = q_full[:26, i]  # Solo las 26 articulaciones actuables
+        q_actuated = q_full[6:32, i]  # Solo las 26 articulaciones actuables
         q_extra = np.zeros(len(jnames) - 26)  # Dedos y pulgares en 0
         jstate.position = np.concatenate([q_actuated, q_extra]).tolist()
 
@@ -295,7 +328,7 @@ if __name__ == '__main__':
     q_full = np.array(q_full)
     #plt.figure(figsize=(10, 6))
     for i in range(6):
-        plt.plot(q_full[20+i,:].flatten(),  label=f'qderecho{i+1}')
+        plt.plot(q_full[20 + 6 +i,:].flatten(),  label=f'qderecho{i+1}')
 
     plt.title("Evolución de las articulaciones del brazo derecho")
     plt.xlabel("Paso de tiempo")
@@ -310,7 +343,7 @@ if __name__ == '__main__':
 
     #plt.figure(figsize=(10, 6))
     for i in range(6):
-        plt.plot(q_full[14+i,:].flatten(), label=f'qizq{i+1}')
+        plt.plot(q_full[14 + 6 +i,:].flatten(), label=f'qizq{i+1}')
 
     plt.title("Evolución de las articulaciones del brazo izquierdo")
     plt.xlabel("Paso de tiempo")
