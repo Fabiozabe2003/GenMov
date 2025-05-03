@@ -4,12 +4,13 @@ from casadi import *
 from forward_kinematics import *
 from nao_dynamics import *
 from nao_jacobian import *
-from optimization import *
+from nao_limits import *
 from read_data import *
 import time
 import numpy as np
 from nao_skills import *
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 import rospy
 from sensor_msgs.msg import JointState
 import tf2_ros
@@ -29,7 +30,7 @@ dynamic_ddq = build_dynamic_ddq()
 Jacobian_contacts = build_Jacobian_contacts()
 
 
-reconstructed_data=reconstruct()
+reconstructed_data=reconstruct("punch.csv")
 left_hand_points=reconstructed_data["lhand"]
 right_hand_points=reconstructed_data["rhand"]
 left_elbow_points=reconstructed_data["lforearm"]
@@ -49,7 +50,7 @@ joint_indices = {
 
 Dof = 32 # 32 cuando agregue los 6 de la base lotante
 Dof_act = 26  #26 qs actuados
-N = 25
+#N = 35
 q = MX.sym('q',Dof*N) # variable 'q' de cuerpo completo
 tau = MX.sym('tau',Dof_act*N)  # par para articulaciones actuadas
 f_contact = MX.sym('f_contact', 3*8*(N))  # fuerzas de contacto (4 por pie)
@@ -60,7 +61,7 @@ start = time.time()
 
 f=0 # costo
 dt = 0.05
-mu = 0.9 # inventado
+mu = 0.5 # inventado
 
 total_constraints = Dof_act*(N-1) + 12*(N) + 8*(N-2) + Dof*(N-2)
 print("Restricciones de g:",total_constraints)
@@ -92,10 +93,10 @@ for i in range(N):
     q_i_base = q_i[joint_indices["f_base"]]
 
 
-    f += ca.sumsqr(ca.vertcat(*fkine_left_arm(q_i_larm)[0:3,3])-ca.vertcat(*left_hand_points[i + 75]))   # Mano izquierda
-    f +=  ca.sumsqr(ca.vertcat(*fkine_left_elbow(q_i_larm)[0:3,3])-ca.vertcat(*left_elbow_points[i + 75]))  # Codo izquierdo
-    f += ca.sumsqr(ca.vertcat(*fkine_right_arm(q_i_rarm)[0:3,3])-ca.vertcat(*right_hand_points[i + 75]))   # Mano derecha
-    f +=  ca.sumsqr(ca.vertcat(*fkine_right_elbow(q_i_rarm)[0:3,3])-ca.vertcat(*right_elbow_points[i + 75]))  # Codo derecho
+    f += ca.sumsqr(ca.vertcat(*fkine_left_arm(q_i_larm)[0:3,3])-ca.vertcat(*left_hand_points[i]))   # Mano izquierda
+    f +=  ca.sumsqr(ca.vertcat(*fkine_left_elbow(q_i_larm)[0:3,3])-ca.vertcat(*left_elbow_points[i]))  # Codo izquierdo
+    f += ca.sumsqr(ca.vertcat(*fkine_right_arm(q_i_rarm)[0:3,3])-ca.vertcat(*right_hand_points[i]))   # Mano derecha
+    f +=  ca.sumsqr(ca.vertcat(*fkine_right_elbow(q_i_rarm)[0:3,3])-ca.vertcat(*right_elbow_points[i]))  # Codo derecho
 
 
     #f += 10 * (q_i_base[3]**2 + q_i_base[4]**2)
@@ -227,11 +228,10 @@ lbf = ca.repmat([-ca.inf]*3*8,N)
 ubf = ca.repmat([ca.inf]*3*8,N)
 
 
+# data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/warmstart_brazos.npz")
 
-data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/warmstart_brazos.npz")
-
-q_warm = data['q_full']
-q0= q_warm.reshape((-1, 1))  # (Dof*N, 1)
+# q_warm = data['q_full']
+# q0= q_warm.reshape((-1, 1))  # (Dof*N, 1)
 
 q0 = np.zeros(Dof*N)
 tau0 = np.zeros(Dof_act*N)
@@ -250,10 +250,9 @@ end = time.time()
 q_full= (sol['x'][:Dof * N]).reshape((Dof,N))
 tau_resultado = (sol['x'][Dof*N :(Dof+Dof_act)*N]).reshape((26,N))  
 tau_resultado = np.array(tau_resultado)
+fuerzas_resultado = (sol['x'][Dof*N + Dof_act*N:]).reshape((24,N))
+fuerzas_resultado = np.array(fuerzas_resultado)
 
-for i in range (Dof_act):
-    print("TAU:", tau_resultado[i, :])
-    print("TAUmax:", np.max(abs(tau_resultado[i,:])))
 
 print("Tiempo de optimización: ", end-start)
 
@@ -322,11 +321,7 @@ def send_joint_states(q_full, rate_hz= 20):
         rate.sleep()
 
 
-
-
-if __name__ == '__main__': 
-    q_full = np.array(q_full)
-    #plt.figure(figsize=(10, 6))
+def plot_results(q_full,fuerzas):
     for i in range(6):
         plt.plot(q_full[20 + 6 +i,:].flatten(),  label=f'qderecho{i+1}')
 
@@ -355,6 +350,65 @@ if __name__ == '__main__':
     plt.tight_layout()
     plt.show()
 
+
+    fig = plt.figure(figsize=(14, 8))
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Dibujar cono de fricción ideal (sólo para referencia visual)
+    theta = np.linspace(0, 2 * np.pi, 50)
+    h = 8.0
+    r = mu * h
+    x_cone = r * np.outer(np.cos(theta), np.linspace(0, 1, 10))
+    y_cone = r * np.outer(np.sin(theta), np.linspace(0, 1, 10))
+    z_cone = h * np.outer(np.ones_like(theta), np.linspace(0, 1, 10))
+    ax.plot_surface(x_cone, y_cone, z_cone, alpha=0.2, color='gray')
+
+    # Colores para contactos
+    colors = plt.cm.tab10(np.linspace(0, 1, 8))
+
+    # Dibujar las fuerzas
+    for contact in range(8):
+        fx = -fuerzas[3 * contact, :]
+        fy = -fuerzas[3 * contact + 1, :]
+        fz = -fuerzas[3 * contact + 2, :]
+        
+        # Verificación de la condición de fricción
+        inside_cone = mu ** 2 * fz ** 2 - fx ** 2 - fy ** 2 >= 0
+
+        # Fuerzas dentro del cono en verde
+        ax.quiver(
+            np.zeros_like(fx[inside_cone]),  # desplazamiento en x por contacto
+            np.zeros_like(fy[inside_cone]),
+            np.zeros_like(fz[inside_cone]),
+            fx[inside_cone], fy[inside_cone], fz[inside_cone],
+            color=colors[contact],
+            label=f'Contacto {contact+1}' if contact == 0 else None,
+            alpha=0.7
+        )
+
+        # Opcional: fuerzas fuera del cono en rojo
+        ax.quiver(
+            np.zeros_like(fx[~inside_cone]) + contact * 2,
+            np.zeros_like(fy[~inside_cone]),
+            np.zeros_like(fz[~inside_cone]),
+            fx[~inside_cone], fy[~inside_cone], fz[~inside_cone],
+            color='red',
+            alpha=0.5
+        )
+
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_zlabel('Z')
+    ax.set_title('Fuerzas y Cono de Fricción')
+    ax.legend()
+    plt.tight_layout()
+    plt.show()       
+
+if __name__ == '__main__': 
+    q_full = np.array(q_full)
+    #plt.figure(figsize=(10, 6))
+
+    plot_results(q_full,fuerzas_resultado)
     send_joint_states(q_full)
 
 

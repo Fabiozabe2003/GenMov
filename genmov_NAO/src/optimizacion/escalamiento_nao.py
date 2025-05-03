@@ -1,7 +1,7 @@
 import bvhio
 import pandas as pd
 import numpy as np
-root = bvhio.readAsHierarchy('/home/andres/momask-codes/generation/control_ponderado/animations/0/sample0_repeat0_len172_ik.bvh')
+root = bvhio.readAsHierarchy('/home/invitado8/momask-codes/generation/exp1/animations/0/sample0_repeat0_len196_ik.bvh')
 nframes = len(root.Keyframes)
 
 #Relaciones con bvh
@@ -225,6 +225,6 @@ for body_part, points in body_part_data.items():
 df = pd.DataFrame(data)
 
 # Save the DataFrame to a CSV file
-filename = "/home/andres/proy_ws/src/GenMov/genmov_NAO/src/motions/move_arms.csv"
+filename = "/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/motions/box.csv"
 df.to_csv(filename, index=False)
 print(f"Motion data saved to {filename}")

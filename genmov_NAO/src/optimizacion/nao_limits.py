@@ -1,25 +1,8 @@
 import numpy as np
-#import cvxpy as cp
 import casadi as ca
 
 
-def joint_contraints(dt,dof,q,dq,ddq,q_min,q_max,dq_min,dq_max,constraints):
-    # Position constraint
-    for i in range(dof):
-        constraint_1 = q_min[i] <= q[i] + dq[i] * dt + 0.5 * ddq[i] * dt**2
-        constraint_2 = q[i] + dq[i] * dt + 0.5 * ddq[i] * dt**2 <= q_max[i]
 
-        constraints.append(constraint_1)
-        constraints.append(constraint_2)
-    
-    # Velocity contraint
-    """for i in range(dof):
-        constraints+=[
-            dq_min[i] <= dq[i] + ddq[i] * dt,
-            dq[i] + ddq[i] * dt  <= dq_max[i]
-            ]"""
-    
-    return constraints
 
 # Limits
 # http://doc.aldebaran.com/2-1/family/robots/joints_robot.html
@@ -59,6 +42,6 @@ tau_max = [0.0143,  0.0143,
             0.0143,  0.0143, 0.0143, 0.0143, 0.0143, 0.0094
 ]
 
-tau_max = [1000*x for x in tau_max]
+tau_max = [100*x for x in tau_max]
 
 tau_min =[-x for x in tau_max]

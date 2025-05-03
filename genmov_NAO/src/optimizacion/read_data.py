@@ -1,9 +1,12 @@
 import pandas as pd 
+import os
 
-df_read = pd.read_csv("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/motions/move_arms.csv")
 #print("Read data:");print(df_read.head())
 
-def reconstruct():
+def reconstruct(filename):
+    base_path = "/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/motions"
+    full_path = os.path.join(base_path, filename)
+    df_read = pd.read_csv(full_path)
     reconstructed_data = {}
     for body_part in df_read["body_part"].unique():
         body_part_data = df_read[df_read["body_part"] == body_part]
