@@ -3,7 +3,6 @@ import casadi as ca
 
 
 
-
 # Limits
 # http://doc.aldebaran.com/2-1/family/robots/joints_robot.html
 q_min = [-ca.inf,-ca.inf, -ca.inf , -ca.inf, -ca.inf, -ca.inf,
@@ -23,11 +22,11 @@ q_max = [ ca.inf,ca.inf, ca.inf , ca.inf, ca.inf, ca.inf,
       ]   #El último joint es abierto/cerrado
 
 
-dq_max=[2.085, 2.085,
-        1.145,1.145,1.145,2.085,1.145,1.145,
-        1.145,1.145,1.145,2.085,1.145,1.145,
-        2.085,2.085,4.161,4.161,6.283, 2.085,#last speed is from hand (which is none)
-        2.085,2.085,4.161,4.161,6.283, 2.085#last speed is from hand (which is none)
+dq_max = [8.26797, 7.19047,
+        4.16174,4.16174,6.40239,6.40239,6.40239,4.16174,
+        4.16174,4.16174,6.40239,6.40239,6.40239,4.16174,
+        8.26797,7.19407,8.26797,7.19407,24.6229, 8.33,#last speed is from hand (which is none)
+        8.26797,7.19407,8.26797,7.19407,24.6229, 8.33 #last speed is from hand (which is none)
         ]
 
 dq_min=[-x for x in dq_max]
@@ -35,13 +34,25 @@ dq_min=[-x for x in dq_max]
 
 # http://doc.aldebaran.com/2-1/family/robots/motors_robot.html
 
-tau_max = [0.0143,  0.0143, 
-           0.065, 0.065, 0.065, 0.065, 0.065, 0.065,  
-            0.065, 0.065, 0.065, 0.065, 0.065, 0.065,  
-            0.0143, 0.0143, 0.0143, 0.0143, 0.0143, 0.0094, 
-            0.0143,  0.0143, 0.0143, 0.0143, 0.0143, 0.0094
+
+# Torque nominal por tipo de motor (Nm)
+torque_nominal = {1: 0.0161, 2: 0.0049, 3: 0.0062}
+
+# Lista de articulaciones con su reducción y tipo de motor
+joint_info = [
+    ("HeadYaw", 150.27, 3), ("HeadPitch", 173.22, 3),
+    ("LHipYawPitch", 201.3, 1), ("LHipRoll", 201.3, 1), ("LHipPitch", 130.85, 1),
+    ("LKneePitch", 130.85, 1), ("LAnklePitch", 130.85, 1), ("LAnkleRoll", 201.3, 1),
+    ("RHipYawPitch", 201.3, 1), ("RHipRoll", 201.3, 1), ("RHipPitch", 130.85, 1),
+    ("RKneePitch", 130.85, 1), ("RAnklePitch", 130.85, 1), ("RAnkleRoll", 201.3, 1),
+    ("LShoulderPitch", 150.27, 3), ("LShoulderRoll", 173.22, 3), ("LElbowYaw", 150.27, 3),
+    ("LElbowRoll", 173.22, 3), ("LWristYaw", 50.61, 2), ("LHand", 36.24, 2),
+    ("RShoulderPitch", 150.27, 3), ("RShoulderRoll", 173.22, 3), ("RElbowYaw", 150.27, 3),
+    ("RElbowRoll", 173.22, 3), ("RWristYaw", 50.61, 2), ("RHand", 36.24, 2)
 ]
 
-tau_max = [100*x for x in tau_max]
+# Cálculo del torque máximo por articulación (en Nm)
+tau_max = [torque_nominal[motor_type] * reduction for _, reduction, motor_type in joint_info]
+
 
 tau_min =[-x for x in tau_max]

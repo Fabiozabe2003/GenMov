@@ -1,0 +1,549 @@
+#!/usr/bin/env python3
+import casadi as ca
+from casadi import *
+from forward_kinematics import *
+from nao_dynamics import *
+from nao_jacobian import *
+from nao_limits import *
+from read_data import *
+import time
+import numpy as np
+from nao_skills import *
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import rospy
+from sensor_msgs.msg import JointState
+import tf2_ros
+import geometry_msgs.msg
+from scipy.spatial.transform import Rotation as R
+from matplotlib import rcParams
+from matplotlib.ticker import FuncFormatter
+
+data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/warmstart_brazos_tesis.npz")
+data2 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/tau_tesis.npz")
+data3 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/fuerzas_tesis.npz")
+
+q = data['q_full']
+tau_resultado = data2['tau_resultado']
+fuerzas_resultado = data3['fuerzas_resultado']
+
+
+dt = 0.05
+mu = 0.35 # inventado
+reconstructed_data=reconstruct("punch.csv")
+left_hand_points=reconstructed_data["lhand"]
+right_hand_points=reconstructed_data["rhand"]
+left_elbow_points=reconstructed_data["lforearm"]
+right_elbow_points=reconstructed_data["rforearm"]
+N=len(left_hand_points)
+print(N)
+
+
+def plot_results(q_full,fuerzas,tau):
+    jnames = [
+        "HeadYaw", "HeadPitch",
+        "LHipYawPitch", "LHipRoll", "LHipPitch", "LKneePitch", "LAnklePitch", "LAnkleRoll",
+        "RHipYawPitch", "RHipRoll", "RHipPitch", "RKneePitch", "RAnklePitch", "RAnkleRoll",
+        "LShoulderPitch", "LShoulderRoll", "LElbowYaw", "LElbowRoll", "LWristYaw", "LHand",
+        "RShoulderPitch", "RShoulderRoll", "RElbowYaw", "RElbowRoll", "RWristYaw", "RHand",
+        "RFinger23", "RFinger13", "RFinger12",
+        "LFinger21", "LFinger13", "LFinger11",
+        "RFinger22", "LFinger22", "RFinger21",
+        "LFinger12", "RFinger11", "LFinger23",
+        "LThumb1", "RThumb1", "RThumb2", "LThumb2"
+    ]
+
+    rcParams.update({
+        "font.family": "serif",
+        "font.size": 12,
+        "axes.titlesize": 14,
+        "axes.labelsize": 12,
+        "legend.fontsize": 10,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "lines.linewidth": 1.25,
+        "figure.dpi": 100
+    })
+
+    time_steps = np.arange(q_full.shape[1])
+
+    #-----------------------------------------------------------------------------------------
+    # Guardamos el error cartesiano para cada tiempo
+    errors_lhand = np.zeros((N, 3))  # x, y, z
+    errors_lelbow= np.zeros((N, 3))  # x, y, z
+
+    p_actual_lhand = np.zeros((N,3))
+    p_actual_lelbow = np.zeros((N,3))
+
+    p_deseada_lhand = np.zeros((N,3))
+    p_deseada_lelbow = np.zeros((N,3))
+
+
+    for i in range(N):
+        p_actual_lhand[i] = fkine_left_arm(q[20:26, i])[0:3,3]
+        p_actual_lelbow[i] = fkine_left_elbow(q[20:26, i])[0:3,3]
+        # Posición deseada en ese instante
+        p_deseada_lhand[i] = left_hand_points[i]  # (x, y, z)
+        p_deseada_lelbow[i] = left_elbow_points[i]  # (x, y, z)
+        # Error cartesiano
+        errors_lhand[i] = p_actual_lhand[i] - p_deseada_lhand[i]
+        errors_lelbow[i] = p_actual_lelbow[i] - p_deseada_lelbow[i]
+
+
+    #--------------------------------------------------------------------------------------------------------------------------------------
+    # Extraer componentes
+    x_deseado_lhand = p_deseada_lhand[:, 0]
+    y_deseado_lhand = p_deseada_lhand[:, 1]
+    z_deseado_lhand = p_deseada_lhand[:, 2]
+
+    x_obtenido_lhand = p_actual_lhand[:, 0]
+    y_obtenido_lhand = p_actual_lhand[:, 1]
+    z_obtenido_lhand = p_actual_lhand[:, 2]
+
+    # Crear subplots
+    
+    fig, axs = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
+
+    # Subplot 1: X
+    fig.suptitle('Evolución temporal de la posición de la mano izquierda',y=1)
+
+    axs[0].plot(x_deseado_lhand, label='x deseado', linestyle='--')
+    axs[0].plot(x_obtenido_lhand, label='x obtenido')
+    axs[0].set_ylabel('x (m)')
+    axs[0].legend()
+    axs[0].grid(True)
+
+    # Subplot 2: Y
+    axs[1].plot(y_deseado_lhand, label='y deseado', linestyle='--')
+    axs[1].plot(y_obtenido_lhand, label='y obtenido')
+    axs[1].set_ylabel('y (m)')
+    axs[1].legend()
+    axs[1].grid(True)
+
+    # Subplot 3: Z
+    axs[2].plot(z_deseado_lhand, label='z deseado', linestyle='--')
+    axs[2].plot(z_obtenido_lhand, label='z obtenido')
+    axs[2].set_ylabel('z (m)')
+    axs[2].set_xlabel('Tiempo (s)')
+    axs[2].legend()
+    axs[2].grid(True)
+
+
+    plt.xlim(0, time_steps[-1])
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
+    plt.tight_layout()
+    plt.show()
+
+    #-------------------------------------------------------------------------------------------------------------------------------------
+    # Extraer componentes
+    x_deseado_lelbow = p_deseada_lelbow[:, 0]
+    y_deseado_lelbow = p_deseada_lelbow[:, 1]
+    z_deseado_lelbow = p_deseada_lelbow[:, 2]
+
+    x_obtenido_lelbow = p_actual_lelbow[:, 0]
+    y_obtenido_lelbow= p_actual_lelbow[:, 1]
+    z_obtenido_lelbow = p_actual_lelbow[:, 2]
+
+    # Crear subplots
+    fig, axs = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
+
+    # Subplot 1: X
+    fig.suptitle('Evolución temporal de la posición del codo izquierdo',y=1)
+
+    axs[0].plot(x_deseado_lelbow, label='x deseado', linestyle='--')
+    axs[0].plot(x_obtenido_lelbow, label='x obtenido')
+    axs[0].set_ylabel('x (m)')
+    axs[0].legend()
+    axs[0].grid(True)
+
+    # Subplot 2: Y
+    axs[1].plot(y_deseado_lelbow, label='y deseado', linestyle='--')
+    axs[1].plot(y_obtenido_lelbow, label='y obtenido')
+    axs[1].set_ylabel('y (m)')
+    axs[1].legend()
+    axs[1].grid(True)
+
+    # Subplot 3: Z
+    axs[2].plot(z_deseado_lelbow, label='z deseado', linestyle='--')
+    axs[2].plot(z_obtenido_lelbow, label='z obtenido')
+    axs[2].set_ylabel('z (m)')
+    axs[2].set_xlabel('Tiempo (s)')
+    axs[2].legend()
+    axs[2].grid(True)
+
+
+    plt.xlim(0, time_steps[-1])
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
+    plt.tight_layout()
+    plt.show()
+
+
+    #--------------------------------------------------------------------------------------------------------------------------------------
+    # Opción 2: Norma del error
+    error_norm_lhand = np.linalg.norm(errors_lhand, axis=1)
+    error_norm_lelbow = np.linalg.norm(errors_lelbow, axis=1)
+
+    plt.figure(figsize=(10, 4))
+    plt.plot(error_norm_lhand, label='Norma del error de la mano izquierda')
+    plt.plot(error_norm_lelbow, label='Norma del error del codo izquierdo')
+    plt.xlabel('Tiempo (s)')
+    plt.ylabel('Error euclideano (m)')
+    plt.title('Norma del error cartesiano de la mano y codo izquierdo')
+    plt.grid(True)
+    plt.xlim(0, time_steps[-1])
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+ #-----------------------------------------------------------------------------------------
+
+     # Guardamos el error cartesiano para cada tiempo
+    errors_rhand = np.zeros((N, 3))  # x, y, z
+    errors_relbow= np.zeros((N, 3))  # x, y, z
+
+    p_actual_rhand = np.zeros((N,3))
+    p_actual_relbow = np.zeros((N,3))
+
+    p_deseada_rhand = np.zeros((N,3))
+    p_deseada_relbow = np.zeros((N,3))
+
+    for i in range(N):
+        p_actual_rhand[i]  = fkine_right_arm(q[26:32, i])[0:3,3]
+        p_actual_relbow[i] = fkine_right_elbow(q[26:32, i])[0:3,3]
+        # Posición deseada en ese instante
+        p_deseada_rhand[i]  = right_hand_points[i]  # (x, y, z)
+        p_deseada_relbow[i] = right_elbow_points[i]  # (x, y, z)
+        # Error cartesiano
+        errors_rhand[i] = p_actual_rhand[i]  - p_deseada_rhand[i] 
+        errors_relbow[i] = p_actual_relbow[i]  - p_deseada_relbow[i] 
+
+
+   #--------------------------------------------------------------------------------------------------------------------------------------
+    # Extraer componentes
+    x_deseado_rhand = p_deseada_rhand[:, 0]
+    y_deseado_rhand = p_deseada_rhand[:, 1]
+    z_deseado_rhand = p_deseada_rhand[:, 2]
+
+    x_obtenido_rhand = p_actual_rhand[:, 0]
+    y_obtenido_rhand = p_actual_rhand[:, 1]
+    z_obtenido_rhand = p_actual_rhand[:, 2]
+
+    # Crear subplots
+    
+    fig, axs = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
+
+    # Subplot 1: X
+    fig.suptitle('Evolución temporal de la posición de la mano derecha',y=1)
+
+    axs[0].plot(x_deseado_rhand, label='x deseado', linestyle='--')
+    axs[0].plot(x_obtenido_rhand, label='x obtenido')
+    axs[0].set_ylabel('x (m)')
+    axs[0].legend()
+    axs[0].grid(True)
+
+    # Subplot 2: Y
+    axs[1].plot(y_deseado_rhand, label='y deseado', linestyle='--')
+    axs[1].plot(y_obtenido_rhand, label='y obtenido')
+    axs[1].set_ylabel('y (m)')
+    axs[1].legend()
+    axs[1].grid(True)
+
+    # Subplot 3: Z
+    axs[2].plot(z_deseado_rhand, label='z deseado', linestyle='--')
+    axs[2].plot(z_obtenido_rhand, label='z obtenido')
+    axs[2].set_ylabel('z (m)')
+    axs[2].set_xlabel('Tiempo (s)')
+    axs[2].legend()
+    axs[2].grid(True)
+
+
+    plt.xlim(0, time_steps[-1])
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
+    plt.tight_layout()
+    plt.show()
+
+    #----------------------------------------------------------------------------------------
+
+    x_deseado_relbow= p_deseada_relbow[:, 0]
+    y_deseado_relbow = p_deseada_relbow[:, 1]
+    z_deseado_relbow= p_deseada_relbow[:, 2]
+
+    x_obtenido_relbow = p_actual_relbow[:, 0]
+    y_obtenido_relbow = p_actual_relbow[:, 1]
+    z_obtenido_relbow= p_actual_relbow[:, 2]
+
+    # Crear subplots
+    
+    fig, axs = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
+
+    # Subplot 1: X
+    fig.suptitle('Evolución temporal de la posición del codo derecho',y=1)
+
+    axs[0].plot(x_deseado_relbow, label='x deseado', linestyle='--')
+    axs[0].plot(x_obtenido_relbow, label='x obtenido')
+    axs[0].set_ylabel('x (m)')
+    axs[0].legend()
+    axs[0].grid(True)
+
+    # Subplot 2: Y
+    axs[1].plot(y_deseado_relbow, label='y deseado', linestyle='--')
+    axs[1].plot(y_obtenido_relbow, label='y obtenido')
+    axs[1].set_ylabel('y (m)')
+    axs[1].legend()
+    axs[1].grid(True)
+
+    # Subplot 3: Z
+    axs[2].plot(z_deseado_relbow, label='z deseado', linestyle='--')
+    axs[2].plot(z_obtenido_relbow, label='z obtenido')
+    axs[2].set_ylabel('z (m)')
+    axs[2].set_xlabel('Tiempo (s)')
+    axs[2].legend()
+    axs[2].grid(True)
+
+
+    plt.xlim(0, time_steps[-1])
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
+    plt.tight_layout()
+    plt.show()
+
+
+    #----------------------------------------------------------------------------------------
+    # Opción 2: Norma del error
+    error_norm_rhand = np.linalg.norm(errors_rhand, axis=1)
+    error_norm_relbow = np.linalg.norm(errors_relbow, axis=1)
+
+    plt.figure(figsize=(10, 4))
+    plt.plot(error_norm_rhand, label='Norma del error de la mano derecha')
+    plt.plot(error_norm_relbow, label='Norma del error del codo derecho')
+    plt.xlabel('Tiempo (s)')
+    plt.ylabel('Error euclideano (m)')
+    plt.title('Norma del error cartesiano de la mano y codo derecho')
+    plt.grid(True)
+    plt.xlim(0, time_steps[-1])
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    #-----------------------------------------------------------------------------------------
+
+    plt.figure(figsize=(10, 4))
+    for i in range(6):
+        plt.plot(q_full[14 + 6 + i, :], label=jnames[14 + i])
+    plt.title("Evolución de las articulaciones del brazo izquierdo")
+    plt.xlabel("Tiempo (s)")
+    plt.ylabel("Ángulo articular (rad)")
+    plt.grid(True)
+    plt.xlim(0, time_steps[-1])
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    #-----------------------------------------------------------------------------------------
+
+    plt.figure(figsize=(10, 4))
+    for i in range(6):
+        plt.plot(q_full[20 + 6 + i, :], label=jnames[20 + i])
+    plt.title("Evolución de las articulaciones del brazo derecho")
+    plt.xlabel("Tiempo (s)")
+    plt.ylabel("Ángulo articular (rad)")
+    plt.grid(True)
+    plt.xlim(0, time_steps[-1])
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
+
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    #-----------------------------------------------------------------------------------------
+    plt.figure(figsize=(12, 5))
+    for i in range(26):
+        plt.plot(tau[i, :], label=jnames[i])
+    plt.xlabel('Tiempo (s)')
+    plt.ylabel('Torque (N.m)')
+    plt.title('Torque de las 26 articulaciones en el tiempo')
+    plt.xlim(0, time_steps[-1])
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+
+    #-----------------------------------------------------------------------------------------
+    fig = plt.figure(figsize=(14, 8))
+    #plt.title("Cono de fricción")
+    ax = fig.add_subplot(111, projection='3d')
+
+    # Colores para contactos
+    colors = plt.cm.tab10(np.linspace(0, 1, 8))
+
+    # Cono de fricción (mismo para todos, solo lo desplazamos)
+    theta = np.linspace(0, 2 * np.pi, 50)
+    h = 8.0
+    r = mu * h
+    x_cone_base = r * np.outer(np.cos(theta), np.linspace(0, 1, 10))
+    y_cone_base = r * np.outer(np.sin(theta), np.linspace(0, 1, 10))
+    z_cone_base = h * np.outer(np.ones_like(theta), np.linspace(0, 1, 10))
+
+    # Posiciones de los contactos
+    contact_positions = np.array([
+        [-1,  1.5, 0],   # T_l1
+        [ 1,  1.5, 0],   # T_l2
+        [-1, -1.5, 0],   # T_l3
+        [ 1, -1.5, 0],   # T_l4
+        [ 5,  1.5, 0],   # T_r1
+        [ 7,  1.5, 0],   # T_r2
+        [ 5, -1.5, 0],   # T_r3
+        [ 7, -1.5, 0],   # T_r4
+    ])
+
+    # Dibujar conos y fuerzas
+    for contact in range(1):
+        pos = contact_positions[contact]
+        
+        # Dibujar cono desplazado
+        ax.plot_surface(
+            x_cone_base + pos[0], 
+            y_cone_base + pos[1], 
+            z_cone_base + pos[2], 
+            alpha=0.2, color='gray'
+        )
+
+        # Obtener componentes de fuerza
+        fx = fuerzas[3 * contact, :]
+        fy = fuerzas[3 * contact + 1, :]
+        fz = fuerzas[3 * contact + 2, :]
+
+        # Verificación del cono
+        inside_cone = mu ** 2 * fz ** 2 - fx ** 2 - fy ** 2 >= 0
+
+        # Dibujar fuerzas dentro del cono
+        ax.quiver(
+            np.full_like(fx[inside_cone], pos[0]),
+            np.full_like(fy[inside_cone], pos[1]),
+            np.full_like(fz[inside_cone], pos[2]),
+            fx[inside_cone], fy[inside_cone], fz[inside_cone],
+            color=colors[contact],
+            arrow_length_ratio=0.05,
+            alpha=0.7
+        )
+
+        # Dibujar fuerzas fuera del cono (opcional)
+        ax.quiver(
+            np.full_like(fx[~inside_cone], pos[0]),
+            np.full_like(fy[~inside_cone], pos[1]),
+            np.full_like(fz[~inside_cone], pos[2]),
+            fx[~inside_cone], fy[~inside_cone], fz[~inside_cone],
+            color='red',
+            arrow_length_ratio=0.05,
+            alpha=0.5
+        )
+        ax.set_xlabel("Fuerza de contacto en x (N)")
+        ax.set_ylabel("Fuerza de contacto en y (N)")
+        ax.set_zlabel("Fuerza de contacto en z (N)")
+    plt.show()
+
+
+
+
+
+def publish_tf(br, position, rpy, frame_id="world", child_frame_id="base_link"):
+    t = geometry_msgs.msg.TransformStamped()
+    t.header.stamp = rospy.Time.now()
+    t.header.frame_id = frame_id
+    t.child_frame_id = child_frame_id
+    t.transform.translation.x = position[0]
+    t.transform.translation.y = position[1]
+    t.transform.translation.z = position[2]
+
+
+    quat = R.from_euler('zyx', [rpy[2],rpy[1],rpy[0]]).as_quat()
+    t.transform.rotation.x = quat[0]
+    t.transform.rotation.y =  quat[1]
+    t.transform.rotation.z = quat[2]
+    t.transform.rotation.w = quat[3]
+
+    br.sendTransform(t)
+
+
+def send_joint_states(q_full, rate_hz= 20):
+    q_full = np.array(q_full)
+    br = tf2_ros.TransformBroadcaster()
+
+    jnames = [
+        "HeadYaw", "HeadPitch",
+        "LHipYawPitch", "LHipRoll", "LHipPitch", "LKneePitch", "LAnklePitch", "LAnkleRoll",
+        "RHipYawPitch", "RHipRoll", "RHipPitch", "RKneePitch", "RAnklePitch", "RAnkleRoll",
+        "LShoulderPitch", "LShoulderRoll", "LElbowYaw", "LElbowRoll", "LWristYaw", "LHand",
+        "RShoulderPitch", "RShoulderRoll", "RElbowYaw", "RElbowRoll", "RWristYaw", "RHand",
+        "RFinger23", "RFinger13", "RFinger12",
+        "LFinger21", "LFinger13", "LFinger11",
+        "RFinger22", "LFinger22", "RFinger21",
+        "LFinger12", "RFinger11", "LFinger23",
+        "LThumb1", "RThumb1", "RThumb2", "LThumb2"
+    ]
+
+    pub = rospy.Publisher('/joint_states', JointState, queue_size=10)
+    rospy.init_node('nao_joint_sender', anonymous=True)
+    rate = rospy.Rate(rate_hz)
+
+    for i in range(N):
+
+        pos = q_full[0:3, i]       # x, y, z
+        rpy = q_full[3:6, i]       # roll, pitch, yaw
+        
+
+        # Publica TF desde world → torso
+        publish_tf(br, pos, rpy)
+        
+        jstate = JointState()
+        jstate.header.stamp = rospy.Time.now()
+        jstate.name = jnames
+
+        q_actuated = q_full[6:32, i]  # Solo las 26 articulaciones actuables
+        q_extra = np.zeros(len(jnames) - 26)  # Dedos y pulgares en 0
+        jstate.position = np.concatenate([q_actuated, q_extra]).tolist()
+
+        pub.publish(jstate)
+        rate.sleep()
+
+
+def nao_trajectory(q_full):
+    robot_ip = "192.168.10.157"  # Replace with your robot's IP
+    robot_port = 9559
+
+    # Create an application instance
+    app = qi.Application(["NAOqiApp", f"--qi-url=tcp://{robot_ip}:{robot_port}"])
+    app.start()  # Start the application
+    session = app.session  # Get the session from the application
+    try:
+        print("Connected to the robot!")
+    except Exception as e:
+        print(f"Failed to connect to robot: {e}")
+    
+    finally:
+        
+        # Enviar primer frame (omitimos las 6 filas de la base flotante)
+        q0 = np.array(q_full[6:, 0].flatten())
+        joints_all(session, q0.tolist())
+
+        # Esperar 3 segundos
+        time.sleep(3)
+
+        # Enviar el resto de la trayectoria
+        for i in range(1, N):
+            qi_frame = np.array(q_full[6:, i].flatten())
+            joints_all(session, qi_frame.tolist())
+
+        app.stop()
+
+
+
+
+if __name__ == '__main__': 
+
+    q_full = np.array(q)
+    #plt.figure(figsize=(10, 6))
+    #send_joint_states(q_full)
+    plot_results(q_full,fuerzas_resultado,tau_resultado)

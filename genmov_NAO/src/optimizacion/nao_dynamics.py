@@ -43,12 +43,12 @@ def dynamic_q(q_i):
     cy = ca.cos(yaw / 2)
     sy = ca.sin(yaw / 2)
 
-    # Calcular cuaternión (qw, qx, qy, qz)
+    # Calcular cuaternión 
     qw = cr * cp * cy + sr * sp * sy
     qx = sr * cp * cy - cr * sp * sy
     qy = cr * sp * cy + sr * cp * sy
     qz = cr * cp * sy - sr * sp * cy
-    quat = ca.vertcat(qw, qx, qy, qz)
+    quat = ca.vertcat(qx, qy, qz, qw)
 
     # Reordenar: [xyz, quat, q_act]
     q_dyn = ca.vertcat(xyz, quat, q_act)

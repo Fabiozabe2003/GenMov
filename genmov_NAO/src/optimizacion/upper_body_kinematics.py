@@ -27,8 +27,8 @@ def fkine_left_elbow(q,qf = None, t = None):
     T2 = dh(0,          q[1]+pi/2,      0.015,      pi/2)                   #LShoulderRoll to LElbowYaw
     T3 = dh(0.105,      q[2]+pi,        0,          pi/2)                   #LElbowYaw to LElbowRoll
     if t=='c' or t=='C':
-        T=T_I_B@T0@T1@T2@T3
         T_I_B=floating_base(qf)
+        T=T_I_B@T0@T1@T2@T3
     else: 
         T=T0@T1@T2@T3
     return T

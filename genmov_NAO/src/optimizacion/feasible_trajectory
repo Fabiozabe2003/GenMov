@@ -30,7 +30,7 @@ dynamic_ddq = build_dynamic_ddq()
 Jacobian_contacts = build_Jacobian_contacts()
 
 
-reconstructed_data=reconstruct("punch.csv")
+reconstructed_data=reconstruct("throw_object.csv")
 left_hand_points=reconstructed_data["lhand"]
 right_hand_points=reconstructed_data["rhand"]
 left_elbow_points=reconstructed_data["lforearm"]
@@ -55,13 +55,14 @@ q = MX.sym('q',Dof*N) # variable 'q' de cuerpo completo
 tau = MX.sym('tau',Dof_act*N)  # par para articulaciones actuadas
 f_contact = MX.sym('f_contact', 3*8*(N))  # fuerzas de contacto (4 por pie)
 S = ca.vertcat(ca.DM.zeros(6, 26), ca.DM_eye(26) )  # Dimensión: 32x26
+f_des = ca.DM([0, 0, 5.4 * 9.81 / 8])  # Vector de 24 elementos: [0, 0, mg/8, ..., 0, 0, mg/8]
 
 
 start = time.time()
 
 f=0 # costo
 dt = 0.05
-mu = 0.5 # inventado
+mu = 0.35 # inventado
 
 total_constraints = Dof_act*(N-1) + 12*(N) + 8*(N-2) + Dof*(N-2)
 print("Restricciones de g:",total_constraints)
@@ -101,7 +102,7 @@ for i in range(N):
 
     #f += 10 * (q_i_base[3]**2 + q_i_base[4]**2)
 
-    #' Restriccion phi(q) = 0
+    # Restriccion phi(q) = 0
     q_i_lleg = q_i[joint_indices["l_leg"]]
     q_i_rleg = q_i[joint_indices["r_leg"]]
 
@@ -152,15 +153,13 @@ for i in range(N):
         dq_i = (q_i1-q_i)/dt
 
         for j in range(Dof_act):
-            g[idx] = dq_i[j + 6] 
+            g[idx] = dq_i[j + 6]
             lbg[idx] = dq_min[j]
             ubg[idx] = dq_max[j]
-            idx+=1
+            idx +=1
 
-
-        # #Restriccion de fricción
+        # # #Restriccion de fricción
         f_i = f_contact[24*i:24*(i+1)]
-
 
         if i<N-2:
             q_i2 = q[Dof*(i+2):Dof*(i+3)]
@@ -182,9 +181,12 @@ for i in range(N):
 
 
             for j in range(8):  # 8 puntos de contacto
-                fx = f_i[3*j + 0]
+                fx = f_i[3*j + 0] #hola
                 fy = f_i[3*j + 1]
                 fz = f_i[3*j + 2]
+
+                #f_vec = ca.vertcat(fx, fy, fz)
+                #f += 0.05*ca.sumsqr(f_vec - f_des)  # Penalización cuadrática por desviación del valor desead
 
                 #f += 10* (fx**2 + fy**2)
                 #Friction cone constraint: mu^2 * fz^2 - fx^2 - fy^2 >= 0
@@ -200,7 +202,16 @@ for i in range(N):
                 ubg[idx] = 0
                 idx +=1
 
-        
+
+# Costo para que la velocidad final sea cercana a cero
+# Considera q_{N-1} y q_{N-2}
+q_N1 = q[Dof*(N-1):Dof*N]
+q_N2 = q[Dof*(N-2):Dof*(N-1)]
+
+dq_final = (q_N1 - q_N2) / dt  # Velocidad final aproximada
+f += 100* ca.sumsqr(dq_final)
+
+
 
 print("IDX:",idx)
 g_all=ca.vertcat(*g)
@@ -216,7 +227,7 @@ opts={"max_iter_eig": 500}
 #      }
 #  }
 
-solver = nlpsol('solver','ipopt',nlp,opts)
+solver = nlpsol('solver','ipopt',nlp)
 
 lbq=ca.repmat(q_min,N)
 ubq=ca.repmat(q_max,N)
@@ -248,7 +259,7 @@ sol = solver(x0 = x_init,
 end = time.time() 
 
 q_full= (sol['x'][:Dof * N]).reshape((Dof,N))
-tau_resultado = (sol['x'][Dof*N :(Dof+Dof_act)*N]).reshape((26,N))  
+tau_resultado = (sol['x'][Dof*N :(Dof+Dof_act)*N]).reshape((26,N))      
 tau_resultado = np.array(tau_resultado)
 fuerzas_resultado = (sol['x'][Dof*N + Dof_act*N:]).reshape((24,N))
 fuerzas_resultado = np.array(fuerzas_resultado)
@@ -258,6 +269,8 @@ print("Tiempo de optimización: ", end-start)
 
 
 np.savez("warmstart_brazos.npz", q_full=q_full)
+np.savez("tau.npz", tau_resultado=tau_resultado)
+np.savez("fuerzas.npz", fuerzas_resultado=fuerzas_resultado)
 
 
 def publish_tf(br, position, rpy, frame_id="world", child_frame_id="base_link"):
@@ -321,9 +334,24 @@ def send_joint_states(q_full, rate_hz= 20):
         rate.sleep()
 
 
-def plot_results(q_full,fuerzas):
+def plot_results(q_full,fuerzas,tau):
+
+    jnames = [
+        "HeadYaw", "HeadPitch",
+        "LHipYawPitch", "LHipRoll", "LHipPitch", "LKneePitch", "LAnklePitch", "LAnkleRoll",
+        "RHipYawPitch", "RHipRoll", "RHipPitch", "RKneePitch", "RAnklePitch", "RAnkleRoll",
+        "LShoulderPitch", "LShoulderRoll", "LElbowYaw", "LElbowRoll", "LWristYaw", "LHand",
+        "RShoulderPitch", "RShoulderRoll", "RElbowYaw", "RElbowRoll", "RWristYaw", "RHand",
+        "RFinger23", "RFinger13", "RFinger12",
+        "LFinger21", "LFinger13", "LFinger11",
+        "RFinger22", "LFinger22", "RFinger21",
+        "LFinger12", "RFinger11", "LFinger23",
+        "LThumb1", "RThumb1", "RThumb2", "LThumb2"
+    ]
+
+
     for i in range(6):
-        plt.plot(q_full[20 + 6 +i,:].flatten(),  label=f'qderecho{i+1}')
+        plt.plot(q_full[20 + 6 +i,:].flatten(),  label=jnames[20 + i])
 
     plt.title("Evolución de las articulaciones del brazo derecho")
     plt.xlabel("Paso de tiempo")
@@ -338,7 +366,7 @@ def plot_results(q_full,fuerzas):
 
     #plt.figure(figsize=(10, 6))
     for i in range(6):
-        plt.plot(q_full[14 + 6 +i,:].flatten(), label=f'qizq{i+1}')
+        plt.plot(q_full[14 + 6 +i,:].flatten(), label=jnames[14 + i])
 
     plt.title("Evolución de las articulaciones del brazo izquierdo")
     plt.xlabel("Paso de tiempo")
@@ -368,9 +396,9 @@ def plot_results(q_full,fuerzas):
 
     # Dibujar las fuerzas
     for contact in range(8):
-        fx = -fuerzas[3 * contact, :]
-        fy = -fuerzas[3 * contact + 1, :]
-        fz = -fuerzas[3 * contact + 2, :]
+        fx = fuerzas[3 * contact, :]
+        fy = fuerzas[3 * contact + 1, :]
+        fz = fuerzas[3 * contact + 2, :]
         
         # Verificación de la condición de fricción
         inside_cone = mu ** 2 * fz ** 2 - fx ** 2 - fy ** 2 >= 0
@@ -402,13 +430,27 @@ def plot_results(q_full,fuerzas):
     ax.set_title('Fuerzas y Cono de Fricción')
     ax.legend()
     plt.tight_layout()
-    plt.show()       
+    plt.show()   
+
+    plt.figure(figsize=(12, 6))
+    for i in range(26):
+        plt.plot(tau[i,:].flatten(), label=jnames[i])
+
+    plt.xlabel('Tiempo')
+    plt.ylabel('Torque')
+    plt.title('Torque de las 26 articulaciones en el tiempo')
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')  # Mueve la leyenda fuera del gráfico
+    plt.tight_layout()
+    plt.grid(True)
+    plt.show()
+
+
 
 if __name__ == '__main__': 
     q_full = np.array(q_full)
     #plt.figure(figsize=(10, 6))
 
-    plot_results(q_full,fuerzas_resultado)
+    plot_results(q_full,fuerzas_resultado,tau_resultado)
     send_joint_states(q_full)
 
 
@@ -427,17 +469,17 @@ def nao_trajectory(q_full):
         print(f"Failed to connect to robot: {e}")
     
     finally:
-        # Close the Qi session properly
-        print("Closing Qi session...")
-        # Initialize the node
-        q_larm_a=np.array(q_full[joint_indices["l_arm"],0].full().flatten())
-        q_rarm_a=np.array(q_full[joint_indices["r_arm"],0].full().flatten())
         
-        joints_larm(session,q_larm_a.tolist())
-        joints_rarm(session,q_rarm_a.tolist())
-        for i in range(N):
-            q_larm_a=np.array(q_full[joint_indices["l_arm"],i].full().flatten());q_rarm_a=np.array(q_full[joint_indices["r_arm"],i].full().flatten())
-            joints_larm(session,q_larm_a.tolist())
-            joints_rarm(session,q_rarm_a.tolist())
+        # Enviar primer frame (omitimos las 6 filas de la base flotante)
+        q0 = np.array(q_full[6:, 0].flatten())
+        joints_all(session, q0.tolist())
+
+        # Esperar 3 segundos
+        time.sleep(3)
+
+        # Enviar el resto de la trayectoria
+        for i in range(1, N):
+            qi_frame = np.array(q_full[6:, i].flatten())
+            joints_all(session, qi_frame.tolist())
 
         app.stop()

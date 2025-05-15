@@ -1,5 +1,5 @@
 import qi
-#import cv2
+import cv2
 import numpy as np
 #from ultralytics import YOLO
 from forward_kinematics import *
@@ -39,6 +39,27 @@ def get_distance(session):
         }
 
     return distances
+
+
+def joints_all(session, q):
+    motion = session.service("ALMotion")
+
+    joint_names = [
+        "HeadYaw", "HeadPitch",
+        "LHipYawPitch", "LHipRoll", "LHipPitch", "LKneePitch", "LAnklePitch", "LAnkleRoll",
+        "RHipYawPitch", "RHipRoll", "RHipPitch", "RKneePitch", "RAnklePitch", "RAnkleRoll",
+        "LShoulderPitch", "LShoulderRoll", "LElbowYaw", "LElbowRoll", "LWristYaw", "LHand",
+        "RShoulderPitch", "RShoulderRoll", "RElbowYaw", "RElbowRoll", "RWristYaw", "RHand"
+    ]
+
+    if len(q) != len(joint_names):
+        print("Error: q must have 26 values corresponding to all the joints.")
+        return
+
+    fraction_max_speed = 0.2  
+
+    motion.setAngles(joint_names, q, fraction_max_speed)
+
 
 
 def joints_rarm(session, q):
@@ -121,13 +142,11 @@ def joints_head(session, q):
 def enable_motors(session):
     motion = session.service("ALMotion")
 
-    # Enable motor stiffness
     motion.stiffnessInterpolation("Head", 1.0, 1.0)
     motion.stiffnessInterpolation("LArm", 1.0, 1.0)
     motion.stiffnessInterpolation("RArm", 1.0, 1.0)
     motion.stiffnessInterpolation("LLeg", 1.0, 1.0)
     motion.stiffnessInterpolation("RLeg", 1.0, 1.0)
-
 
 def sit_down(session):
     posture = session.service("ALRobotPosture")
@@ -160,6 +179,19 @@ def turn(session, angle):  # belocidad ija
 
     print(f"Turning {angle} radians")
 
+
+def get_imu(session):
+    memory = session.service("ALMemory")
+
+    # Leer orientación (ángulos)
+    angle_x = memory.getData("Device/SubDeviceList/InertialSensor/AngleX/Sensor/Value")
+    angle_y = memory.getData("Device/SubDeviceList/InertialSensor/AngleY/Sensor/Value")
+    angle_z = memory.getData("Device/SubDeviceList/InertialSensor/AngleZ/Sensor/Value")
+
+    # Imprimir en consola
+    print(f"Ángulos → x: {angle_x:.3f}, y: {angle_y:.3f}, z: {angle_z:.3f}")
+
+    return angle_x, angle_y, angle_z
 
 
 def connect_camera(session, camera_id=0, resolution=1, color_space=13, fps=10):
@@ -439,7 +471,7 @@ def stereo_vision(session):
 
         
 def main():
-    robot_ip = "192.168.10.100"  # Replace with your robot's IP
+    robot_ip = "192.168.10.202"  # Replace with your robot's IP
     robot_port = 9559
 
     # Create an application instance
@@ -450,24 +482,20 @@ def main():
     try:
         print("Connected to the robot!")
 
-        motion = session.service("ALMotion")
-
-         # Enable motor stiffness
-        motion.stiffnessInterpolation("Head", 1.0, 1.0)
-
-        stereo_vision(session)
-        #capture_images(session)
-        # Call the walk_forward function
-        #enable_motors(session)
-        #joints_rarm(session, [0.3, -0.2, 1.0, 0.5, 0.3, 0.8])
-        #joints_larm(session, [0.3, 0.2, -1.0, -0.5, -0.3, 0.8])
-        #turn(session,3.14)
-        #sit_down(session)
+        #motion = session.service("ALMotion")t
+        angles_list = []
+        angle_x, angle_y, angle_z = get_imu(session)
+        angles_list.append([angle_x, angle_y, angle_z])
+        
 
     except Exception as e:
         print(f"Failed to connect to robot: {e}")
     
     finally:
+
+        np.savez("angulos.npz", angles_list = angles_list)
+
+
         # Close the Qi session properly
         print("Closing Qi session...")
         app.stop()
