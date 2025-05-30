@@ -61,12 +61,18 @@ def rpy_to_omega(rpy, drpy):
     """
     roll, pitch, yaw = rpy[0], rpy[1], rpy[2]
 
-    # Matriz de transformación T(rpy)
+    #Matriz de transformación T(rpy)
     T = ca.vertcat(
         ca.horzcat(1, 0, -ca.sin(pitch)),
         ca.horzcat(0, ca.cos(roll), ca.cos(pitch)*ca.sin(roll)),
         ca.horzcat(0, -ca.sin(roll), ca.cos(pitch)*ca.cos(roll))
     )
+
+    # T = ca.vertcat(
+    #     ca.horzcat(ca.cos(pitch)*ca.cos(yaw),-ca.sin(yaw), 0),
+    #     ca.horzcat(ca.cos(pitch)*ca.sin(yaw), ca.cos(yaw),0),
+    #     ca.horzcat( -ca.sin(pitch),0, 1),
+    # )
 
     omega = T @ drpy
     return omega
@@ -80,10 +86,21 @@ def dynamic_dq(dq_i, rpy):
     dv   = dq_i[0:3]        # velocidades lineales
     drpy = dq_i[3:6]        # derivadas de RPY
     dq_joints = dq_i[6:]    # articulaciones
+    
+    # Compute rotation matrix from base to world (ZYX Euler)
+    roll, pitch, yaw = rpy[0], rpy[1], rpy[2]
+    R = ca.vertcat(
+        ca.horzcat(ca.cos(yaw)*ca.cos(pitch), ca.cos(yaw)*ca.sin(pitch)*ca.sin(roll)-ca.sin(yaw)*ca.cos(roll), ca.cos(yaw)*ca.sin(pitch)*ca.cos(roll)+ca.sin(yaw)*ca.sin(roll)),
+        ca.horzcat(ca.sin(yaw)*ca.cos(pitch), ca.sin(yaw)*ca.sin(pitch)*ca.sin(roll)+ca.cos(yaw)*ca.cos(roll), ca.sin(yaw)*ca.sin(pitch)*ca.cos(roll)-ca.cos(yaw)*ca.sin(roll)),
+        ca.horzcat(-ca.sin(pitch), ca.cos(pitch)*ca.sin(roll), ca.cos(pitch)*ca.cos(roll))
+    )
 
     omega = rpy_to_omega(rpy, drpy)
-    dq_base_dyn = ca.vertcat(dv, omega)
-    
+
+    dv_local     = R.T @ dv
+    omega_local  = omega #R.T @ omega
+
+    dq_base_dyn = ca.vertcat(dv_local, omega_local)
     dq_dyn = ca.vertcat(dq_base_dyn, dq_joints)
     return dq_dyn
 
@@ -99,30 +116,48 @@ def build_dynamic_ddq():
     ddrpy   = ddq[3:6]
     ddq_act = ddq[6:32]
 
-    # Matriz T(rpy)
+
     roll, pitch, yaw = rpy[0], rpy[1], rpy[2]
+
+    R = ca.vertcat(
+        ca.horzcat(ca.cos(yaw)*ca.cos(pitch), ca.cos(yaw)*ca.sin(pitch)*ca.sin(roll)-ca.sin(yaw)*ca.cos(roll), ca.cos(yaw)*ca.sin(pitch)*ca.cos(roll)+ca.sin(yaw)*ca.sin(roll)),
+        ca.horzcat(ca.sin(yaw)*ca.cos(pitch), ca.sin(yaw)*ca.sin(pitch)*ca.sin(roll)+ca.cos(yaw)*ca.cos(roll), ca.sin(yaw)*ca.sin(pitch)*ca.cos(roll)-ca.cos(yaw)*ca.sin(roll)),
+        ca.horzcat(-ca.sin(pitch), ca.cos(pitch)*ca.sin(roll), ca.cos(pitch)*ca.cos(roll))
+    )
+
+    # Matriz T(rpy)
     T = ca.vertcat(
         ca.horzcat(1, 0, -ca.sin(pitch)),
-        ca.horzcat(0, ca.cos(roll), ca.cos(pitch) * ca.sin(roll)),
-        ca.horzcat(0, -ca.sin(roll), ca.cos(pitch) * ca.cos(roll))
+        ca.horzcat(0, ca.cos(roll), ca.cos(pitch)*ca.sin(roll)),
+        ca.horzcat(0, -ca.sin(roll), ca.cos(pitch)*ca.cos(roll))
     )
+
+    # T = ca.vertcat(
+    #     ca.horzcat(ca.cos(pitch)*ca.cos(yaw),-ca.sin(yaw), 0),
+    #     ca.horzcat(ca.cos(pitch)*ca.sin(yaw), ca.cos(yaw),0),
+    #     ca.horzcat( -ca.sin(pitch),0, 1),
+    # )
+
 
     omega = T @ drpy
     domega = ca.jacobian(omega, rpy) @ drpy + T @ ddrpy
 
-    # Concatenar vdot
-    vdot = ca.vertcat(ddx, domega, ddq_act)
+    # Transform to local (body) frame
+    ddx_local = R.T @ ddx
+    domega_local =  domega #R.T @ domega
+
+    vdot = ca.vertcat(ddx_local, domega_local, ddq_act)
 
     # Crear función simbólica final
     return ca.Function('dynamic_ddq', [rpy, drpy, ddq], [vdot])
 
 
-model_path = "/home/invitado8/proy_ws/src/nao/nao_utec/urdf/"
-urdf_filename = "naoV40red.urdf"
-urdf_model_path = join(model_path, urdf_filename)
+# model_path = "/home/invitado8/proy_ws/src/nao/nao_utec/urdf/"
+# urdf_filename = "naoV40red.urdf"
+# urdf_model_path = join(model_path, urdf_filename)
 
-model = pin.buildModelFromUrdf(urdf_model_path, pin.JointModelFreeFlyer())
-data = model.createData()
+# model = pin.buildModelFromUrdf(urdf_model_path, pin.JointModelFreeFlyer())
+# data = model.createData()
 
 
 
