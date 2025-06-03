@@ -117,14 +117,25 @@ def build_Jacobian_contacts():
     T_l1, T_l2, T_l3, T_l4 = sfkine_left_foot_contacts( q_i_lleg,q_i_base,"c" )
     T_r1, T_r2, T_r3, T_r4 = sfkine_right_foot_contacts( q_i_rleg,q_i_base,"c")
 
-    # Extraer posiciones de cada transformación
-    positions = [T[0:3, 3] for T in [T_l1, T_l2, T_l3, T_l4, T_r1, T_r2, T_r3, T_r4]]
+    # Positions of each contact point
+    pos_l = [T[0:3, 3] for T in [T_l1, T_l2, T_l3, T_l4]]
+    pos_r = [T[0:3, 3] for T in [T_r1, T_r2, T_r3, T_r4]]
 
-    positions = ca.vertcat(*positions)
+    pos_all = ca.vertcat(*(pos_l + pos_r))
+    pos_l_only = ca.vertcat(*pos_l)
+    pos_r_only = ca.vertcat(*pos_r)
 
-    J_i_func = ca.Function('J_i_func', [q_i_sym], [ca.jacobian(positions, q_i_sym)])
+    # Jacobians
+    J_all = ca.jacobian(pos_all, q_i_sym)
+    J_left = ca.jacobian(pos_l_only, q_i_sym)
+    J_right = ca.jacobian(pos_r_only, q_i_sym)
 
-    return J_i_func
+    # CasADi functions
+    J_all_func = ca.Function('J_all_func', [q_i_sym], [J_all])
+    J_left_func = ca.Function('J_left_func', [q_i_sym], [J_left])
+    J_right_func = ca.Function('J_right_func', [q_i_sym], [J_right])
+
+    return J_all_func, J_left_func, J_right_func
 
 
 
@@ -142,3 +153,8 @@ def build_Jacobian_contacts():
 # J_contacts = build_Jacobian_contacts()
 # print(J_contacts(q_i).T.shape)
 # print( (J_contacts(q_i).T@f_i).shape)
+
+# roll = ca.SX.sym('r')
+# pitch = ca.SX.sym('p')
+# yaw = ca.SX.sym('y')
+# print(sTrotz(yaw)@sTroty(pitch)@sTrotx(roll))

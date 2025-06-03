@@ -1,0 +1,400 @@
+#!/usr/bin/env python3
+import rospy
+import casadi as ca
+from casadi import *
+from sensor_msgs.msg import JointState
+import pinocchio as pin
+from pinocchio import buildModelFromUrdf
+from pinocchio import casadi as cpin
+from os.path import join
+from markers import *
+from forward_kinematics import *
+from nao_functions import *
+from functions.symbolic_nao_functions import *
+from functions.symbolic_upper_body_kinematics import *
+from functions.symbolic_lower_body_kinematics import *
+from functions.symbolic_mathematical_functions import *
+from optimization import *
+from read_data import *
+import time
+import tf2_ros
+import geometry_msgs.msg
+from scipy.spatial.transform import Rotation as R
+
+ti=time.time()
+model_path = "/home/invitado8/proy_ws/src/nao/nao_utec/urdf/"
+urdf_filename = "naoV40red.urdf"
+urdf_model_path = join(model_path, urdf_filename)
+model = pin.buildModelFromUrdf(urdf_model_path, pin.JointModelFreeFlyer())
+DOF=model.nv
+DOF_a=DOF-6
+
+# Definition on dynamic_matrices
+def dynamic_matrices_fun(model):
+    cmodel = cpin.Model(model)
+    cdata = cmodel.createData()
+
+    # Define symbolic variables (SX type)
+    cq = ca.SX.sym("q", model.nq)
+    cv = ca.SX.sym("v", model.nv)
+
+    # Compute matrices
+    cpin.crba(cmodel, cdata, cq)
+    M = cdata.M
+    g = cpin.computeGeneralizedGravity(cmodel, cdata, cq)
+    C = cpin.computeCoriolisMatrix(cmodel, cdata, cq, cv)
+    b = C @ cv + g
+
+    # Symmetrize M
+    M_sym = ca.triu(M) + ca.transpose(ca.triu(M) - ca.diag(ca.diag(M)))
+
+    # Define permutation: [joints first, floating base last]
+    nfb = 6
+    nj = model.nv - nfb
+    perm = list(range(nfb, model.nv)) + list(range(nfb))  # joints first
+
+    # Create permutation matrix
+    P = ca.SX.eye(model.nv)[perm, :]  # shape: (nv, nv)
+
+    # Reorder M and b
+    M_reordered = P @ M_sym @ P.T
+    b_reordered = P @ b
+
+    # CasADi functions
+    M_fun = ca.Function('M_fun', [cq], [M_reordered])
+    b_fun = ca.Function('b_fun', [cq, cv], [b_reordered])
+    return M_fun, b_fun
+M_fun, b_fun = dynamic_matrices_fun(model)
+Jacobian_contacts = build_Jacobian_contacts()
+reconstructed_data=reconstruct()
+left_hand_points=reconstructed_data["lhand"]
+right_hand_points=reconstructed_data["rhand"]
+left_elbow_points=reconstructed_data["lforearm"]
+right_elbow_points=reconstructed_data["rforearm"]
+
+left_foot_points=reconstructed_data["lfoot"]
+right_foot_points=reconstructed_data["rfoot"]
+left_knee_points=reconstructed_data["lknee"]
+right_knee_points=reconstructed_data["rknee"]
+N=len(left_foot_points)
+N=50
+
+p_rfijo = [0.03, -0.05 , 0]
+p_lfijo = [0.03, 0.05 , 0]
+
+r_rfijo =  np.array ([[1, 0, 0],
+                      [0, 0, 1],
+                      [0, -1, 0]]) 
+
+r_lfijo =  np.array ([[1, 0, 0],
+                      [0, 0, 1],
+                      [0, -1, 0]]) 
+
+q=MX.sym('q',DOF*N)
+tau=MX.sym('tau',DOF_a*N)
+g=[]; lbg=[];ubg=[]
+f=0
+dt=0.05
+mu=0.7
+fuerzas=[]
+S=ca.MX.zeros(26,32)
+for i in range(DOF_a):
+    S[i,i]=1
+
+for i in range(N):
+    q_i=q[DOF*i : DOF*(i+1)]
+    tau_i=tau[DOF_a*i : DOF_a*(i+1)]
+
+    # velocity and acceleration calculation using euler
+    if i<(N-1):
+        q_i_1 = q[DOF*(i+1): DOF*(i+2)]
+        dq_i = (q_i_1-q_i)/dt
+        # velocity constraint
+        #opti.subject_to(opti.bounded(dq_min,dq_i,dq_max))
+        g.append(dq_i)
+        lbg.append(dq_min)
+        ubg.append(dq_max)
+    if i<(N-2):
+        q_i_2  = q[DOF*(i+2) : DOF*(i+3)]
+        
+    q_i_lleg = q_i[2:8]
+    q_i_rleg = q_i[8:14]
+    q_i_larm = q_i[14:20]
+    q_i_rarm = q_i[20:26]
+    q_i_fb = q_i[26:32]
+    q_i_lelbow = q_i[14:17]
+    q_i_relbow = q_i[20:23]
+
+    f += ca.sumsqr(ca.vertcat(*fkine_left_arm(q_i_larm,q_i_fb,'b')[0:3,3])-ca.vertcat(*left_hand_points[i+75]))   # Mano izquierda
+    f +=  ca.sumsqr(ca.vertcat(*fkine_left_elbow(q_i_larm,q_i_fb,'b')[0:3,3])-ca.vertcat(*left_elbow_points[i+75]))  # Codo izquierdo
+    f += ca.sumsqr(ca.vertcat(*fkine_right_arm(q_i_rarm,q_i_fb,'b')[0:3,3])-ca.vertcat(*right_hand_points[i+75]))   # Mano derecha
+    f +=  ca.sumsqr(ca.vertcat(*fkine_right_elbow(q_i_rarm,q_i_fb,'b')[0:3,3])-ca.vertcat(*right_elbow_points[i+75]))  # Codo derecho
+
+    # Dynamic matrices
+    q_dyn=dynamic_q(q_i)
+    dq_dyn=dynamic_dq(dq_i,q_i[29:32])
+    M = M_fun(q_dyn)
+    B = b_fun(q_dyn, dq_dyn)
+
+    # Forces jacobians
+    """J_contacts = ca.vertcat(
+        sym_J_fb_left_foot_contacts(q_i_lleg,q_i_fb),
+        sym_J_fb_right_foot_contacts(q_i_rleg,q_i_fb))"""
+    J_contacts = Jacobian_contacts(q_i)
+
+    # Constaint point jacobians
+    J_point=ca.vertcat(
+        sym_J_fb_left_foot_constant(q_i_lleg,q_i_fb),
+        sym_J_fb_right_foot_constant(q_i_rleg,q_i_fb)
+    )
+
+    # Remaining elements of linear equation matrices
+    zero_block=ca.MX.zeros(J_point.shape[0],J_contacts.shape[0])
+    dJ=dJdq(q_i,dq_i)
+
+    # Linear equation matrices
+    A=ca.vertcat(
+        ca.horzcat(M,-J_contacts.T),
+        ca.horzcat(J_point,zero_block)
+    )
+    BM=ca.vertcat(    
+        ca.transpose(S)@tau_i - B,
+        -dJ@dq_i
+    )
+
+    # Linear equation
+    eps = 1e-6
+    AtA = A.T @ A + eps * ca.MX.eye(A.size2())
+    x=ca.solve(AtA,A.T@BM)
+    ddq=x[0:DOF]
+    forces=x[DOF:]
+
+    # Friction cone constraint
+    F=ca.reshape(forces, (3,8))
+    fx, fy, fz = F[0,:], F[1,:], F[2,:]
+    
+    """print(F.shape)
+    fuerzas.append(F)
+    print(len(fuerzas))
+    print(fuerzas[0].shape)
+    print(type(fuerzas))
+    print(fuerzas[i][:].shape)"""
+
+    friction_cone=mu**2*fz**2-fx**2-fy**2
+    g.append(friction_cone.T)
+    lbg.append([0]*8)
+    ubg.append([ca.inf]*8)
+
+
+    # Feet position constraint
+        # Feet position constraint
+    T_lleg = fkine_left_foot_constant(q_i_lleg,q_i_fb,'c')
+    p_lleg = T_lleg[0:3,3]
+    r_lleg = T_lleg[0:3,0:3]
+    T_rleg = fkine_right_foot_constant(q_i_rleg,q_i_fb,'c')
+    p_rleg = T_rleg[0:3,3]
+    r_rleg = T_rleg[0:3,0:3]
+
+    R_err_left = r_lfijo.T@r_lleg # rotación relativa
+    R_err_right = r_rfijo.T@r_rleg 
+
+    theta_err_left = ca.vertcat(R_err_left[2,1] - R_err_left[1,2], R_err_left[0,2] - R_err_left[2,0],
+                                R_err_left[1,0] - R_err_left[0,1]) / 2.0  # Aproximación de log(R) para pequeñas rotaciones
+    theta_err_right = ca.vertcat(R_err_right[2,1] - R_err_right[1,2], R_err_right[0,2] - R_err_right[2,0],
+                                 R_err_right[1,0] - R_err_right[0,1]) / 2.0  # Aproximación de log(R) para pequeñas rotaciones
+    
+    for j in range(3):
+        g.append(p_rleg[j] - p_rfijo[j])
+        lbg.append(0)
+        ubg.append(0)
+        g.append(p_lleg[j] - p_lfijo[j])
+        lbg.append(0)
+        ubg.append(0)
+        g.append(theta_err_left[j])
+        lbg.append(0)
+        ubg.append(0)
+        g.append(theta_err_right[j])
+        lbg.append(0)
+        ubg.append(0)
+
+
+
+print("Cálculo completo. Inicio de programa de optimización...") 
+t_in=time.time()
+
+lbq=ca.repmat(q_min,N)
+ubq=ca.repmat(q_max,N)
+lbtau=ca.repmat(tau_min,N)
+ubtau=ca.repmat(tau_max,N)
+lbx=ca.vertcat(lbq,lbtau)
+ubx=ca.vertcat(ubq,ubtau)
+
+# Nonlinear constraints
+lbg = ca.vertcat(*lbg)
+ubg = ca.vertcat(*ubg)
+g = ca.vertcat(*g)
+
+# Solver
+nlp={}
+nlp['x']=ca.vertcat(q,tau)
+nlp['f']=f
+nlp['g']=g
+opts={
+    'ipopt.linear_solver':'mumps',
+    'ipopt.tol': 1e-4,
+    'ipopt.max_iter': 500,
+    'ipopt.print_level': 5,
+    'ipopt.constr_viol_tol': 1e-4,
+    'ipopt.acceptable_tol': 1e-3,
+    'ipopt.acceptable_iter': 10
+}
+solver=ca.nlpsol('solver','ipopt',nlp, opts)
+sol=solver(lbx=lbx,ubx=ubx,lbg=lbg,ubg=ubg)
+q_sol=(sol['x'][:DOF*N]).reshape((DOF,N))
+tau_sol=(sol['x'][DOF*N:]).reshape((DOF_a,N))
+
+t_fin=time.time()
+tt=t_fin-t_in
+tmin=tt//60
+tsec=tt%60
+print(f"El programa de optimización tomó: {tt} segundos, o {tmin} minutos y {tsec} segundos")
+
+# Se guardan los archivos
+np.savetxt(f'q_sol_{N}.txt', q_sol, fmt='%.6f')
+np.savetxt(f'tau_sol_{N}.txt', tau_sol, fmt='%.6f')
+
+
+# Ploteo y envío de qs
+
+import matplotlib.pyplot as plt
+q_full=np.array(q_sol)
+print(q_full.shape)
+for i in range(6):
+    plt.plot(q_full[20+i,:].flatten(),  label=f'qderecho{i+1}')
+plt.title("Evolución de las articulaciones del brazo derecho")
+plt.xlabel("Paso de tiempo")
+plt.ylabel("Ángulo articular (rad)")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+for i in range(6):
+    plt.plot(q_full[14+i,:].flatten(), label=f'qizq{i+1}')
+plt.title("Evolución de las articulaciones del brazo izquierdo")
+plt.xlabel("Paso de tiempo")
+plt.ylabel("Ángulo articular (rad)")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+"""
+fig = plt.figure(figsize=(14, 8))
+ax = fig.add_subplot(111, projection='3d')
+# Dibujar cono de fricción ideal (sólo para referencia visual)
+theta = np.linspace(0, 2 * np.pi, 50)
+h = 8.0
+r = mu * h
+x_cone = r * np.outer(np.cos(theta), np.linspace(0, 1, 10))
+y_cone = r * np.outer(np.sin(theta), np.linspace(0, 1, 10))
+z_cone = h * np.outer(np.ones_like(theta), np.linspace(0, 1, 10))
+ax.plot_surface(x_cone, y_cone, z_cone, alpha=0.2, color='gray')
+# Colores para contactos
+colors = plt.cm.tab10(np.linspace(0, 1, 8))
+# Dibujar las fuerzas
+fuerzas = np.array(fuerzas)
+for contact in range(8):
+    fx = -fuerzas[3 * contact, :]
+    fy = -fuerzas[3 * contact + 1, :]
+    fz = -fuerzas[3 * contact + 2, :]
+    
+    # Verificación de la condición de fricción
+    inside_cone = mu ** 2 * fz ** 2 - fx ** 2 - fy ** 2 >= 0
+    # Fuerzas dentro del cono en verde
+    ax.quiver(
+        np.zeros_like(fx[inside_cone]),  # desplazamiento en x por contacto
+        np.zeros_like(fy[inside_cone]),
+        np.zeros_like(fz[inside_cone]),
+        fx[inside_cone], fy[inside_cone], fz[inside_cone],
+        color=colors[contact],
+        label=f'Contacto {contact+1}' if contact == 0 else None,
+        alpha=0.7
+    )
+    # Opcional: fuerzas fuera del cono en rojo
+    ax.quiver(
+        np.zeros_like(fx[~inside_cone]) + contact * 2,
+        np.zeros_like(fy[~inside_cone]),
+        np.zeros_like(fz[~inside_cone]),
+        fx[~inside_cone], fy[~inside_cone], fz[~inside_cone],
+        color='red',
+        alpha=0.5
+    )
+ax.set_xlabel('X')
+ax.set_ylabel('Y')
+ax.set_zlabel('Z')
+ax.set_title('Fuerzas y Cono de Fricción')
+ax.legend()
+plt.tight_layout()
+plt.show() """
+
+
+def publish_tf(br, position, rpy, frame_id="world", child_frame_id="base_link"):
+    t = geometry_msgs.msg.TransformStamped()
+    t.header.stamp = rospy.Time.now()
+    t.header.frame_id = frame_id
+    t.child_frame_id = child_frame_id
+    t.transform.translation.x = position[0]
+    t.transform.translation.y = position[1]
+    t.transform.translation.z = position[2]
+
+
+    quat = R.from_euler('zyx', [rpy[2],rpy[1],rpy[0]]).as_quat()
+    t.transform.rotation.x = quat[0]
+    t.transform.rotation.y =  quat[1]
+    t.transform.rotation.z = quat[2]
+    t.transform.rotation.w = quat[3]
+
+    br.sendTransform(t)
+
+def send_joint_states(q_full, rate_hz= 20):
+    q_full = np.array(q_full)
+    br = tf2_ros.TransformBroadcaster()
+
+    jnames = [
+        "HeadYaw", "HeadPitch",
+        "LHipYawPitch", "LHipRoll", "LHipPitch", "LKneePitch", "LAnklePitch", "LAnkleRoll",
+        "RHipYawPitch", "RHipRoll", "RHipPitch", "RKneePitch", "RAnklePitch", "RAnkleRoll",
+        "LShoulderPitch", "LShoulderRoll", "LElbowYaw", "LElbowRoll", "LWristYaw", "LHand",
+        "RShoulderPitch", "RShoulderRoll", "RElbowYaw", "RElbowRoll", "RWristYaw", "RHand",
+        "RFinger23", "RFinger13", "RFinger12",
+        "LFinger21", "LFinger13", "LFinger11",
+        "RFinger22", "LFinger22", "RFinger21",
+        "LFinger12", "RFinger11", "LFinger23",
+        "LThumb1", "RThumb1", "RThumb2", "LThumb2"
+    ]
+
+    pub = rospy.Publisher('/joint_states', JointState, queue_size=10)
+    rospy.init_node('nao_joint_sender', anonymous=True)
+    rate = rospy.Rate(rate_hz)
+
+    for i in range(N):
+
+        pos = q_full[26:29, i]       # x, y, z
+        rpy = q_full[29:32, i]       # roll, pitch, yaw
+        
+
+        # Publica TF desde world → torso
+        publish_tf(br, pos, rpy)
+        
+        jstate = JointState()
+        jstate.header.stamp = rospy.Time.now()
+        jstate.name = jnames
+
+        q_actuated = q_full[0:26, i]  # Solo las 26 articulaciones actuables
+        q_extra = np.zeros(len(jnames) - 26)  # Dedos y pulgares en 0
+        jstate.position = np.concatenate([q_actuated, q_extra]).tolist()
+
+        pub.publish(jstate)
+        rate.sleep()
+
+if __name__ == '__main__':
+    send_joint_states(q_full)

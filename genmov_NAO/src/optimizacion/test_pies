@@ -27,15 +27,31 @@ model = pin.buildModelFromUrdf(urdf_model_path, pin.JointModelFreeFlyer())
 data = model.createData()
 M_din,b_din = dynamic_matrices_fun(model)
 dynamic_ddq = build_dynamic_ddq()
-Jacobian_contacts = build_Jacobian_contacts()
+Jacobian_contacts, Jacobian_lcontacts, Jacobian_rcontacts = build_Jacobian_contacts()
 
 
-reconstructed_data=reconstruct("throw_object.csv")
+reconstructed_data, left_contact, right_contact =reconstruct("Step.csv")
 left_hand_points=reconstructed_data["lhand"]
 right_hand_points=reconstructed_data["rhand"]
 left_elbow_points=reconstructed_data["lforearm"]
 right_elbow_points=reconstructed_data["rforearm"]
+left_foot_points = reconstructed_data["lfoot"]
+right_foot_points = reconstructed_data["rfoot"]
+
 N=len(left_hand_points)
+
+print("TENEMOS N:",N)
+
+
+#right_contact = np.ones(N,dtype=int )   # reconstructed_data["right_contact"]
+left_contact = np.ones(N,dtype=int)    #reconstructed_data["left_contact"]
+
+# Cantidad de puntos en contacto con el suelo (que implican fuerzas de contacto)
+N_contacts_right = sum(right_contact)
+N_contacts_left = sum(left_contact)
+N2_contacts_right = sum(right_contact[:(N-2)])
+N2_contacts_left= sum(left_contact[:(N-2)])
+
 
 
 joint_indices = {
@@ -53,7 +69,7 @@ Dof_act = 26  #26 qs actuados
 #N = 35
 q = MX.sym('q',Dof*N) # variable 'q' de cuerpo completo
 tau = MX.sym('tau',Dof_act*N)  # par para articulaciones actuadas
-f_contact = MX.sym('f_contact', 3*8*(N))  # fuerzas de contacto (4 por pie)
+f_contact = MX.sym('f_contact',  12*(N_contacts_left + N_contacts_right))  # fuerzas de contacto (12 por pie en el suelo)
 S = ca.vertcat(ca.DM.zeros(6, 26), ca.DM_eye(26) )  # Dimensión: 32x26
 f_des = ca.DM([0, 0, 5.4 * 9.81 / 8])  # Vector de 24 elementos: [0, 0, mg/8, ..., 0, 0, mg/8]
 
@@ -64,26 +80,28 @@ f=0 # costo
 dt = 0.05
 mu = 0.35 # inventado
 
-total_constraints = Dof_act*(N-1) + 12*(N) + 8*(N-2) + Dof*(N-2) + N# + 26
+#total_constraints = Dof_act*(N-1) + 12*(N) + 8*(N-2) + Dof*(N-2) + N
+total_constraints = Dof_act*(N-1) + (N_contacts_left + N_contacts_right)*6 + (N2_contacts_left + N2_contacts_right)*4 + Dof*(N-2) + N 
 
-q_inicial_deseado = [0.04597806930541992, 0.28067994117736816, 
-                     0.05986785888671875, -0.08432793617248535, 0.25928807258605957, -0.09208202362060547,
-                      0.11654210090637207, 0.07674193382263184, 0.05986785888671875, 0.06447005271911621, 
-                      0.26840806007385254, -0.09232791513204575, 0.09514999389648438, -0.010695934295654297, 
-                      1.2839161157608032, -0.06293606758117676, -1.4373998641967773, -0.5736739635467529, 
-                      1.8238691091537476, 0.08920001983642578, 1.2441158294677734, 0.029103994369506836,
-                        1.254770040512085, 0.48018407821655273, -0.6550600528717041, 0.3999999761581421]
+
+# q_inicial_deseado = [0.04597806930541992, 0.28067994117736816, 
+#                      0.05986785888671875, -0.08432793617248535, 0.25928807258605957, -0.09208202362060547,
+#                       0.11654210090637207, 0.07674193382263184, 0.05986785888671875, 0.06447005271911621, 
+#                       0.26840806007385254, -0.09232791513204575, 0.09514999389648438, -0.010695934295654297, 
+#                       1.2839161157608032, -0.06293606758117676, -1.4373998641967773, -0.5736739635467529, 
+#                       1.8238691091537476, 0.08920001983642578, 1.2441158294677734, 0.029103994369506836,
+#                         1.254770040512085, 0.48018407821655273, -0.6550600528717041, 0.3999999761581421]
 
 
 print("Restricciones de g:",total_constraints)
 
 lbg=[0]*total_constraints
 ubg=[0]*total_constraints
-g=[0]*total_constraints # rebisar bien , posible error 
+g=[0]*total_constraints 
 
 dt = 0.05
 idx = 0
-
+k_fuerzas = 0
 
 p_rfijo = [0.03, -0.05 , 0]
 p_lfijo = [0.03, 0.05 , 0]
@@ -96,90 +114,128 @@ r_lfijo =  np.array ([[1, 0, 0],
                       [0, 0, 1],
                       [0, -1, 0]]) 
 
+rHip = 0
+rphicontact = 0
+ruerzas = 0
+rbelocidades = 0
+rdinamica = 0
 
 
 for i in range(N):
     q_i = q[Dof*i :Dof*(i+1)]  
-
-    g[idx] = q_i[8] - q_i[14]
+    g[idx] = q_i[8] - q_i[14] # Restriccion por hip
     lbg[idx] = 0
     ubg[idx] = 0
     idx +=1
+    rHip += 1
+    #print("RESTRICCION DE HIP:",idx)
 
     q_i_larm =  q_i[joint_indices["l_arm"]]
     q_i_rarm =  q_i[joint_indices["r_arm"]]
     q_i_base = q_i[joint_indices["f_base"]]
+    q_i_lleg = q_i[joint_indices["l_leg"]]
+    q_i_rleg = q_i[joint_indices["r_leg"]]
 
+    #f += 10 * ((q_i_base[0]+0.0015)**2 + (q_i_base[1]+ 0.002)**2 +  (q_i_base[2]-0.3148)**2)
 
     f += ca.sumsqr(ca.vertcat(*fkine_left_arm(q_i_larm)[0:3,3])-ca.vertcat(*left_hand_points[i]))   # Mano izquierda
     f +=  ca.sumsqr(ca.vertcat(*fkine_left_elbow(q_i_larm)[0:3,3])-ca.vertcat(*left_elbow_points[i]))  # Codo izquierdo
     f += ca.sumsqr(ca.vertcat(*fkine_right_arm(q_i_rarm)[0:3,3])-ca.vertcat(*right_hand_points[i]))   # Mano derecha
     f +=  ca.sumsqr(ca.vertcat(*fkine_right_elbow(q_i_rarm)[0:3,3])-ca.vertcat(*right_elbow_points[i]))  # Codo derecho
 
-    # if i==0:
+
+    if (left_contact[i]==0):
+        f += ca.sumsqr(ca.vertcat(*fkine_left_foot_constant(q_i_lleg)[0:3,3])-ca.vertcat(*left_foot_points[i]))
+    
+    if (right_contact[i]==0):  # Pie levantado, seguimos referencia
+        f += ca.sumsqr(ca.vertcat(*fkine_right_foot_constant(q_i_rleg)[0:3,3])-ca.vertcat(*right_foot_points[i]))
+
+        # if i==0:
     #     f += 0.01*ca.sumsqr(q_i[6:32] - q_inicial_deseado)
 
     #f += 10 * (q_i_base[3]**2 + q_i_base[4]**2)
 
     # Restriccion phi(q) = 0
-    q_i_lleg = q_i[joint_indices["l_leg"]]
-    q_i_rleg = q_i[joint_indices["r_leg"]]
 
-    T_lleg = fkine_left_foot_constant(q_i_lleg,q_i_base,'c')
-    p_lleg = T_lleg[0:3,3]
-    r_lleg = T_lleg[0:3,0:3]
+    if (left_contact[i]):  # Si el pie esta en el piso mantenemos su posicion y orientacion
+        T_lleg = fkine_left_foot_constant(q_i_lleg,q_i_base,'c')
+        p_lleg = T_lleg[0:3,3]
+        r_lleg = T_lleg[0:3,0:3]
 
-    T_rleg = fkine_right_foot_constant(q_i_rleg,q_i_base,'c')
-    p_rleg = T_rleg[0:3,3]
-    r_rleg = T_rleg[0:3,0:3]
-
-
-    for j in range(3):
-        g[idx] = p_rleg[j] - p_rfijo[j]
-        lbg[idx] = 0
-        ubg[idx] = 0
-        idx +=1
-        
-        g[idx] = p_lleg[j] - p_lfijo[j]
-        lbg[idx] = 0
-        ubg[idx] = 0
-        idx +=1
-
-    R_err_left = r_lfijo.T@r_lleg # rotación relativa
-    R_err_right = r_rfijo.T@r_rleg 
-
-    theta_err_left = ca.vertcat(R_err_left[2,1] - R_err_left[1,2], R_err_left[0,2] - R_err_left[2,0],
+        R_err_left = r_lfijo.T@r_lleg 
+        theta_err_left = ca.vertcat(R_err_left[2,1] - R_err_left[1,2], R_err_left[0,2] - R_err_left[2,0],
                                 R_err_left[1,0] - R_err_left[0,1]) / 2.0  # Aproximación de log(R) para pequeñas rotaciones
 
+        for j in range(3):
+            g[idx] = p_lleg[j] - p_lfijo[j]
+            lbg[idx] = 0
+            ubg[idx] = 0
+            idx +=1
+            rphicontact +=1
+        
 
-    theta_err_right = ca.vertcat(R_err_right[2,1] - R_err_right[1,2], R_err_right[0,2] - R_err_right[2,0],
+            g[idx] = theta_err_left[j]
+            lbg[idx] = 0.0
+            ubg[idx] = 0.0
+            idx += 1
+            rphicontact +=1
+        #print("Agregando restriccion de pos y orientacion:", idx)
+
+    if (right_contact[i]): # SI el pie esta en el piso mantenemos posicion y orientacion
+        
+        T_rleg = fkine_right_foot_constant(q_i_rleg,q_i_base,'c')
+        p_rleg = T_rleg[0:3,3]
+        r_rleg = T_rleg[0:3,0:3]
+
+        R_err_right = r_rfijo.T@r_rleg 
+        theta_err_right = ca.vertcat(R_err_right[2,1] - R_err_right[1,2], R_err_right[0,2] - R_err_right[2,0],
                                  R_err_right[1,0] - R_err_right[0,1]) / 2.0  # Aproximación de log(R) para pequeñas rotaciones
 
 
-    for j in range(3):
-        g[idx] = theta_err_left[j]
-        lbg[idx] = 0.0
-        ubg[idx] = 0.0
-        idx += 1
+        for j in range(3):
+            g[idx] = p_rleg[j] - p_rfijo[j]
+            lbg[idx] = 0
+            ubg[idx] = 0
+            idx +=1
 
-        g[idx] = theta_err_right[j]
-        lbg[idx] = 0.0
-        ubg[idx] = 0.0
-        idx += 1
+            rphicontact +=1
 
+            g[idx] = theta_err_right[j]
+            lbg[idx] = 0.0
+            ubg[idx] = 0.0
+            idx += 1
+
+            rphicontact+=1
+        #print("Agregando restriccion de pos y orientacion:", idx)
+        
     if i<N-1: #evaluar
         q_i1 = q[Dof*(i+1):Dof*(i+2)]
         dq_i = (q_i1-q_i)/dt
+
+        f += 0.0008*dq_i.T@dq_i
 
         for j in range(Dof_act):
             g[idx] = dq_i[j + 6]
             lbg[idx] = dq_min[j]
             ubg[idx] = dq_max[j]
             idx +=1
+            rbelocidades +=1
+        #print("Agregando restriccion de belocidad:", idx)
 
-        # # #Restriccion de fricción
-        f_i = f_contact[24*i:24*(i+1)]
+        #Restriccion de fricción
 
+        if (right_contact[i] and left_contact[i]): 
+            f_i = f_contact[k_fuerzas:(k_fuerzas+24)]   
+            k_fuerzas += 24
+        
+        elif (left_contact[i] ^ right_contact[i]):  # Si solo tenemos uno pie en contacto, debemos considerar 12 fuerzas
+            f_i = f_contact[k_fuerzas:(k_fuerzas+12)]    
+            k_fuerzas +=  12
+
+        else:
+            f_i = ca.MX.zeros(2) 
+
+        
         if i<N-2:
             q_i2 = q[Dof*(i+2):Dof*(i+3)]
             ddq_i = (q_i2 - 2*q_i1 + q_i)/ dt**2
@@ -192,20 +248,31 @@ for i in range(N):
 
             M_i =  M_din(dyn_q) #M(q_i1)
             b_i = b_din(dyn_q,dyn_dq)
-            J_i = Jacobian_contacts(q_i)
+
+            if (right_contact[i] and left_contact[i]): 
+                J_i = Jacobian_contacts(q_i)
+
+            elif (left_contact[i]) :
+                J_i = Jacobian_lcontacts(q_i)
+
+            elif (right_contact[i]):
+                J_i = Jacobian_rcontacts(q_i)
+
+            else:
+                J_i = ca.MX.sym('aux', 2, 32)
 
             tau_i = tau[Dof_act*i:Dof_act*(i+1)]
             dyn = M_i@dyn_ddq + b_i - J_i.T@f_i - S@tau_i
             #dyn = ca.mtimes(M_i, dyn_ddq) + b_i -  ca.mtimes(J_i.T, f_i) - ca.mtimes(S, tau_i)
 
-
-            for j in range(8):  # 8 puntos de contacto
-                fx = f_i[3*j + 0] #hola
+            
+            for j in range(f_i.numel()//3):  # Cantidad de uerzas/3 = puntos de contacto
+                fx = f_i[3*j + 0] 
                 fy = f_i[3*j + 1]
                 fz = f_i[3*j + 2]
 
-                #f_vec = ca.vertcat(fx, fy, fz)
-                #f += 0.05*ca.sumsqr(f_vec - f_des)  # Penalización cuadrática por desviación del valor desead
+                f_vec = ca.vertcat(fx, fy, fz)
+                f += 0.00001*ca.sumsqr(f_vec - f_des)  # Penalización cuadrática por desviación del valor desead
 
                 #f += 10* (fx**2 + fy**2)
                 #Friction cone constraint: mu^2 * fz^2 - fx^2 - fy^2 >= 0
@@ -214,12 +281,25 @@ for i in range(N):
                 ubg[idx] = ca.inf
                 idx += 1
 
+                ruerzas +=1
+
+            #print("Agregando restriccion de uerza:", idx)
+
 
             for j in range(Dof):
                 g[idx] = dyn[j]  
                 lbg[idx] = 0
                 ubg[idx] = 0
                 idx +=1
+                rdinamica +=1
+                
+            print("Agregando restriccion de dinamica:", idx)
+
+
+
+
+print("Se esperaba :", Dof_act*(N-1),(N_contacts_left + N_contacts_right)*6,(N2_contacts_left + N2_contacts_right)*4,Dof*(N-2),N)
+print("Se asignaron:", rbelocidades, rphicontact, ruerzas, rdinamica, rHip)
 
 
 # Costo para que la velocidad final sea cercana a cero
@@ -229,7 +309,6 @@ q_N2 = q[Dof*(N-2):Dof*(N-1)]
 
 dq_final = (q_N1 - q_N2) / dt  # Velocidad final aproximada
 f += 100* ca.sumsqr(dq_final)
-
 
 
 print("IDX:",idx)
@@ -243,13 +322,13 @@ opts={"max_iter_eig": 500}
 
 
 opts = {
-    'ipopt.linear_solver': 'mumps',
-    'ipopt.tol': 1e-3,  # tolerancia general más laxa
-    'ipopt.constr_viol_tol': 1e-3,  # tolerancia en restricciones
+    #'ipopt.linear_solver': 'ma27',
+    'ipopt.tol': 1e-2,  # tolerancia general más laxa
+    'ipopt.constr_viol_tol': 1e-4,  # tolerancia en restricciones
     'ipopt.acceptable_tol': 1e-2,  # tolerancia aceptable (para cortar antes)
-    'ipopt.acceptable_constr_viol_tol': 1e-2,
+    'ipopt.acceptable_constr_viol_tol': 1e-3,
     'ipopt.acceptable_iter': 5,  # si se alcanza tolerancia aceptable por 5 iteraciones, termina
-    'ipopt.max_iter': 300
+    'ipopt.max_iter': 500
 }
 
 solver = nlpsol('solver','ipopt',nlp,opts)
@@ -260,28 +339,29 @@ ubq=ca.repmat(q_max,N)
 lbtau =ca.repmat(tau_min,N)
 ubtau = ca.repmat(tau_max,N)
 
-lbf = ca.repmat([-ca.inf]*3*8,N)
-ubf = ca.repmat([ca.inf]*3*8,N)
+lbf = ca.repmat([-ca.inf]*(N_contacts_left+N_contacts_right),12)
+ubf = ca.repmat([ca.inf]*(N_contacts_left+N_contacts_right),12)
 
 
-data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/warmstart_brazostest.npz")
-data2 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/tautest.npz")
-data3 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/fuerzastest.npz")
+#data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/warmstart_brazos.npz")
+#data2 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/tau.npz")
+#data3 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/fuerzas.npz")
 
-q_warm = data['q_full']
-print(q_warm.shape)
-tau_warm = data2['tau_resultado']
-fuerzas_warm = data3['fuerzas_resultado']
-q0= q_warm.reshape(-1, order='F')  # (Dof*N, 1)
-tau0= tau_warm.reshape(-1, order='F')   
-fc0= fuerzas_warm.reshape(-1, order='F')  
-print(q0.shape)
-print(tau0.shape)
-print( fc0.shape)
+
+#q_warm = data['q_full']
+# print(q_warm.shape)
+#tau_warm = data2['tau_resultado']
+# fuerzas_warm = data3['fuerzas_resultado']
+#q0= q_warm.reshape(-1, order='F')  # (Dof*N, 1)
+#tau0= tau_warm.reshape(-1, order='F')   
+# fc0= fuerzas_warm.reshape(-1, order='F')  
+# print(q0.shape)
+# print(tau0.shape)
+# print( fc0.shape)
 
 q0 = np.zeros(Dof*N)
 tau0 = np.zeros(Dof_act*N)
-fc0 = np.zeros(24*N)
+fc0 = np.zeros(12*(N_contacts_left+N_contacts_right))
 x_init = ca.vertcat(ca.DM(q0), ca.DM(tau0), ca.DM(fc0))
 
 
@@ -296,8 +376,22 @@ end = time.time()
 q_full= (sol['x'][:Dof * N]).reshape((Dof,N))
 tau_resultado = (sol['x'][Dof*N :(Dof+Dof_act)*N]).reshape((26,N))      
 tau_resultado = np.array(tau_resultado)
-fuerzas_resultado = (sol['x'][Dof*N + Dof_act*N:]).reshape((24,N))
-fuerzas_resultado = np.array(fuerzas_resultado)
+fuerzas_resultado_raw = np.array(sol['x'][Dof*N + Dof_act*N:]) 
+
+
+# Recuperamos las fuerzas en el orden correcto
+k_fuerzas = 0
+fuerzas_resultado = np.zeros((24, N))
+
+for i in range(N):
+    if (left_contact[i]):  # Si esta en el piso hay fuerzas asociadas
+        fuerzas_resultado[0:12,i] = fuerzas_resultado_raw[12*k_fuerzas:12*(k_fuerzas+1)].reshape(12)
+        k_fuerzas +=1
+    
+    if (right_contact[i]): # Si esta en contacto en el piso hay fuerzas asociadas
+        fuerzas_resultado[12:24,i] = fuerzas_resultado_raw[12*k_fuerzas:12*(k_fuerzas+1)].reshape(12)
+        k_fuerzas +=1
+    
 
 
 print("Tiempo de optimización: ", end-start)
@@ -313,6 +407,7 @@ def publish_tf(br, position, rpy, frame_id="world", child_frame_id="base_link"):
     t.header.stamp = rospy.Time.now()
     t.header.frame_id = frame_id
     t.child_frame_id = child_frame_id
+    #print("POSICION DE BASE FLOTANTE AHORA:",position[0],position[1],position[2])
     t.transform.translation.x = position[0]
     t.transform.translation.y = position[1]
     t.transform.translation.z = position[2]

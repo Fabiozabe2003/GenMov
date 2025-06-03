@@ -23,11 +23,13 @@ q_max = [ ca.inf,ca.inf, ca.inf , ca.inf, ca.inf, ca.inf,
 
 
 dq_max = [8.26797, 7.19047,
-        4.16174,4.16174,6.40239,6.40239,6.40239,4.16174,
-        4.16174,4.16174,6.40239,6.40239,6.40239,4.16174,
-        8.26797,7.19407,8.26797,7.19407,24.6229, 8.33,#last speed is from hand (which is none)
-        8.26797,7.19407,8.26797,7.19407,24.6229, 8.33 #last speed is from hand (which is none)
+          4.16174,4.16174,6.40239,6.40239,6.40239,4.16174,
+          4.16174,4.16174,6.40239,6.40239,6.40239,4.16174,
+          8.26797,7.19407,8.26797,7.19407,24.6229, 8.33, 
+          8.26797,7.19407,8.26797,7.19407,24.6229, 8.33 #last speed is from hand (which is none)
         ]
+
+dq_max = [x/2 for x in dq_max]
 
 dq_min=[-x for x in dq_max]
 
@@ -36,9 +38,11 @@ dq_min=[-x for x in dq_max]
 
 
 # Torque nominal por tipo de motor (Nm)
-torque_nominal = {1: 0.0161, 2: 0.0049, 3: 0.0062}
+torque_nominal =  {1: 0.0161, 2: 0.0049, 3: 0.0062} # Le he quitado un 0 a los decimales para prueba
+#torque_nominal = {1: 0.0680, 2: 0.0094, 3:0.0143}
 
 # Lista de articulaciones con su reducción y tipo de motor
+#INTER CAMPEON
 joint_info = [
     ("HeadYaw", 150.27, 3), ("HeadPitch", 173.22, 3),
     ("LHipYawPitch", 201.3, 1), ("LHipRoll", 201.3, 1), ("LHipPitch", 130.85, 1),
