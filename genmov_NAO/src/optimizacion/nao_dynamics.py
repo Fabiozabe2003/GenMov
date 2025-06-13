@@ -4,6 +4,26 @@ from os.path import join
 import casadi as ca
 
 
+
+def center_of_mass_fun(model):
+    cmodel = cpin.Model(model)
+    cdata = cmodel.createData()
+
+    # Variable simbólica para la configuración articular
+    cq = ca.SX.sym("q", model.nq)
+
+    # Calcular el centro de masa con CasADi
+    com = cpin.centerOfMass(cmodel, cdata, cq)
+
+    # Extraer el vector 3D del centro de masa del sistema completo
+    #com = cdata.com[0]
+
+    com_fun = ca.Function("com_fun", [cq], [com])
+
+    return com_fun
+
+
+
 def dynamic_matrices_fun(model):
     cmodel = cpin.Model(model)
     cdata = cmodel.createData()
@@ -13,14 +33,14 @@ def dynamic_matrices_fun(model):
     cv = ca.SX.sym("v", model.nv)
 
     # Compute matrices
-    cpin.crba(cmodel, cdata, cq)
-    M = cdata.M
+    #cpin.crba(cmodel, cdata, cq)
+    M =  cpin.crba(cmodel, cdata, cq)    #cdata.M
     g = cpin.computeGeneralizedGravity(cmodel, cdata, cq)
     C = cpin.computeCoriolisMatrix(cmodel, cdata, cq, cv)
     b = C @ cv + g
 
     # Symmetrize M
-    M_sym = ca.triu(M) + ca.transpose(ca.triu(M) - ca.diag(ca.diag(M)))
+    #M_sym = ca.triu(M) + ca.transpose(ca.triu(M) - ca.diag(ca.diag(M)))
 
     # CasADi functions
     M_fun = ca.Function('M_fun', [cq], [M])
@@ -108,9 +128,9 @@ def dynamic_dq(dq_i, rpy):
 def build_dynamic_ddq():
 
     # Variables simbólicas
-    rpy     = ca.MX.sym('rpy', 3)
-    drpy    = ca.MX.sym('drpy', 3)
-    ddq     = ca.MX.sym('ddq',32)
+    rpy     = ca.SX.sym('rpy', 3)
+    drpy    = ca.SX.sym('drpy', 3)
+    ddq     = ca.SX.sym('ddq',32)
 
     ddx     = ddq[0:3]
     ddrpy   = ddq[3:6]

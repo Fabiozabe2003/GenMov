@@ -7,19 +7,18 @@ import casadi as ca
 # http://doc.aldebaran.com/2-1/family/robots/joints_robot.html
 q_min = [-ca.inf,-ca.inf, -ca.inf , -ca.inf, -ca.inf, -ca.inf,
     -2.086017, -0.330041, #Chequear Head-Yaw/Pitch
-    -1.145303, -0.379472, -1.535889, -0.092346, -1.189516, -0.397880, #Chequear ankle-pitch/roll
-    -1.145303, -0.790447, -1.535889, -0.103083, -1.186448, -0.768992, #Chequear ankle-pitch/roll
-    -2.0857 , -0.3142, -2.0857, -1.5446, -1.8238, -1,   #El último joint es abierto/cerrado
-    -2.0857 , -1.3265, -2.0857, 0.0349, -1.8238, -1
-     ]   #El último joint es abierto/cerrado
+    -1.14529, -0.379435, -1.53589, -0.0923279, -1.18944, -0.397761,
+    -1.14529, -0.79046, -1.53589, -0.0923279, -1.1863, -0.768992, 
+    -2.08567, -0.314159, -2.08567, -1.54462, -1.82387, 0.0, 
+    -2.08567, -1.32645, -2.08567, 0.0349066, -1.82387, 0.0]
+
 
 q_max = [ ca.inf,ca.inf, ca.inf , ca.inf, ca.inf, ca.inf,
-    2.086017, 0.200015, #Chequear Head-Yaw/Pitch
-    0.740810, 0.790477, 0.484090, 2.112528, 0.922747, 0.769001, #Chequear ankle-pitch/roll
-    0.740810, 0.484090, 2.120198, 2.112528, 0.932056, 0.397935, #Chequear ankle-pitch/roll
-    2.0857 , 1.3265, 2.0857, -0.0349, 1.8238, 1,  #El último joint es abierto/cerrado
-    2.0857 , 0.3142, 2.0857, 1.5446, 1.8238, 1
-      ]   #El último joint es abierto/cerrado
+      2.086017, 0.200015, 
+      0.740718, 0.79046, 0.48398, 2.11255, 0.922581, 0.768992,
+      0.740718, 0.379435, 0.48398, 2.11255, 0.932006, 0.397761, 
+      2.08567, 1.32645, 2.08567, -0.0349066, 1.82387, 1.0,
+      2.08567, 0.314159, 2.08567, 1.54462, 1.82387, 1.0]
 
 
 dq_max = [8.26797, 7.19047,
@@ -29,7 +28,7 @@ dq_max = [8.26797, 7.19047,
           8.26797,7.19407,8.26797,7.19407,24.6229, 8.33 #last speed is from hand (which is none)
         ]
 
-dq_max = [x/2 for x in dq_max]
+dq_max = [x/4 for x in dq_max]
 
 dq_min=[-x for x in dq_max]
 
@@ -42,7 +41,6 @@ torque_nominal =  {1: 0.0161, 2: 0.0049, 3: 0.0062} # Le he quitado un 0 a los d
 #torque_nominal = {1: 0.0680, 2: 0.0094, 3:0.0143}
 
 # Lista de articulaciones con su reducción y tipo de motor
-#INTER CAMPEON
 joint_info = [
     ("HeadYaw", 150.27, 3), ("HeadPitch", 173.22, 3),
     ("LHipYawPitch", 201.3, 1), ("LHipRoll", 201.3, 1), ("LHipPitch", 130.85, 1),
@@ -58,5 +56,13 @@ joint_info = [
 # Cálculo del torque máximo por articulación (en Nm)
 tau_max = [torque_nominal[motor_type] * reduction for _, reduction, motor_type in joint_info]
 
+
+tau_max = [1.547, 1.532, 
+           3.348, 3.348, 3.023, 3.023, 3.023, 3.348, 
+           3.348, 3.348, 3.0226, 3.0226, 3.0226, 3.348, 
+           1.329, 1.7835, 1.547, 1.532, 0.4075, 0.292,
+             1.329, 1.783, 1.547, 1.532, 0.4075, 0.292]
+
+tau_max = [x*0.75 for x in tau_max]
 
 tau_min =[-x for x in tau_max]

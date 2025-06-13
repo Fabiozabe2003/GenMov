@@ -27,10 +27,10 @@ model = pin.buildModelFromUrdf(urdf_model_path, pin.JointModelFreeFlyer())
 data = model.createData()
 M_din,b_din = dynamic_matrices_fun(model)
 dynamic_ddq = build_dynamic_ddq()
-Jacobian_contacts = build_Jacobian_contacts()
+Jacobian_contacts, Jacobian_lcontacts, Jacobian_rcontacts = build_Jacobian_contacts()
 
 
-reconstructed_data=reconstruct("throw_object.csv")
+reconstructed_data=reconstruct("throw_object.csv","arms")
 left_hand_points=reconstructed_data["lhand"]
 right_hand_points=reconstructed_data["rhand"]
 left_elbow_points=reconstructed_data["lforearm"]
@@ -50,10 +50,10 @@ joint_indices = {
 
 Dof = 32 # 32 cuando agregue los 6 de la base lotante
 Dof_act = 26  #26 qs actuados
-#N = 35
-q = MX.sym('q',Dof*N) # variable 'q' de cuerpo completo
-tau = MX.sym('tau',Dof_act*N)  # par para articulaciones actuadas
-f_contact = MX.sym('f_contact', 3*8*(N))  # fuerzas de contacto (4 por pie)
+N = 125
+q = SX.sym('q',Dof*N) # variable 'q' de cuerpo completo
+tau = SX.sym('tau',Dof_act*N)  # par para articulaciones actuadas
+f_contact = SX.sym('f_contact', 3*8*(N))  # fuerzas de contacto (4 por pie)
 S = ca.vertcat(ca.DM.zeros(6, 26), ca.DM_eye(26) )  # Dimensión: 32x26
 f_des = ca.DM([0, 0, 5.4 * 9.81 / 8])  # Vector de 24 elementos: [0, 0, mg/8, ..., 0, 0, mg/8]
 
@@ -171,6 +171,8 @@ for i in range(N):
         q_i1 = q[Dof*(i+1):Dof*(i+2)]
         dq_i = (q_i1-q_i)/dt
 
+        f += 0.001*dq_i.T@dq_i
+
         for j in range(Dof_act):
             g[idx] = dq_i[j + 6]
             lbg[idx] = dq_min[j]
@@ -242,15 +244,16 @@ nlp['g'] = g_all
 opts={"max_iter_eig": 500}
 
 
-opts = {
-    'ipopt.linear_solver': 'mumps',
-    'ipopt.tol': 1e-3,  # tolerancia general más laxa
-    'ipopt.constr_viol_tol': 1e-3,  # tolerancia en restricciones
+opts = { 
+    'ipopt.linear_solver': 'ma86',
+    'ipopt.tol': 1e-2,  # tolerancia general más laxa
+    'ipopt.constr_viol_tol': 1e-4,  # tolerancia en restricciones
     'ipopt.acceptable_tol': 1e-2,  # tolerancia aceptable (para cortar antes)
-    'ipopt.acceptable_constr_viol_tol': 1e-2,
+    'ipopt.acceptable_constr_viol_tol': 1e-3,
     'ipopt.acceptable_iter': 5,  # si se alcanza tolerancia aceptable por 5 iteraciones, termina
-    'ipopt.max_iter': 300
+    'ipopt.max_iter': 500
 }
+
 
 solver = nlpsol('solver','ipopt',nlp,opts)
 
@@ -264,20 +267,20 @@ lbf = ca.repmat([-ca.inf]*3*8,N)
 ubf = ca.repmat([ca.inf]*3*8,N)
 
 
-data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/warmstart_brazostest.npz")
-data2 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/tautest.npz")
-data3 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/fuerzastest.npz")
+# data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/warmstart_brazostest.npz")
+# data2 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/tautest.npz")
+# data3 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/fuerzastest.npz")
 
-q_warm = data['q_full']
-print(q_warm.shape)
-tau_warm = data2['tau_resultado']
-fuerzas_warm = data3['fuerzas_resultado']
-q0= q_warm.reshape(-1, order='F')  # (Dof*N, 1)
-tau0= tau_warm.reshape(-1, order='F')   
-fc0= fuerzas_warm.reshape(-1, order='F')  
-print(q0.shape)
-print(tau0.shape)
-print( fc0.shape)
+# q_warm = data['q_full']
+# print(q_warm.shape)
+# tau_warm = data2['tau_resultado']
+# fuerzas_warm = data3['fuerzas_resultado']
+# q0= q_warm.reshape(-1, order='F')  # (Dof*N, 1)
+# tau0= tau_warm.reshape(-1, order='F')   
+# fc0= fuerzas_warm.reshape(-1, order='F')  
+# print(q0.shape)
+# print(tau0.shape)
+# print( fc0.shape)
 
 q0 = np.zeros(Dof*N)
 tau0 = np.zeros(Dof_act*N)

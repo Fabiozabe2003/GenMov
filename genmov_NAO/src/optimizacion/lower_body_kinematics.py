@@ -82,6 +82,27 @@ def fkine_right_foot_contacts(q,qf,t):
     R=Trotx(-pi/2)
     return T0@R@T1,T0@R@T2,T0@R@T3,T0@R@T4
 
+
+def fkine_left_foot_ground(q,qf,t):
+    T0=fkine_left_leg(q,qf,t)
+    T1=Trasl(-0.06,0.04519,-0.04)
+    T2=Trasl(-0.06,0.04519,0.055)
+    T3=Trasl(0.1,0.04519,0.055)
+    T4=Trasl(0.1,0.04519,-0.04)
+    return T0@T1,T0@T2,T0@T3,T0@T4
+
+def fkine_right_foot_ground(q,qf,t):
+    T0=fkine_right_leg(q,qf,t)
+    T1=Trasl(-0.06,0.04519,-0.06)
+    T2=Trasl(-0.06,0.04519,0.04)
+    T3=Trasl(0.1,0.04519,0.04)
+    T4=Trasl(0.1,0.04519,-0.06)
+    R=Trotx(-pi/2)
+    return T0@R@T1,T0@R@T2,T0@R@T3,T0@R@T4
+
+
+
+
 def fkine_left_foot_constant(q,qf = None,t = None):
     T0=fkine_left_leg(q,qf,t)
     T1=Trasl(0.03,0.04519,0)

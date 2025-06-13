@@ -107,7 +107,7 @@ joint_indices = {
 
 
 def build_Jacobian_contacts():
-    q_i_sym = ca.MX.sym('q_i', 32)
+    q_i_sym = ca.SX.sym('q_i', 32)
 
     q_i_lleg = q_i_sym[joint_indices["l_leg"]]
     q_i_rleg = q_i_sym[joint_indices["r_leg"]]

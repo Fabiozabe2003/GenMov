@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import casadi as ca
-from casadi import *
+
+
 from forward_kinematics import *
 from nao_dynamics import *
 from nao_jacobian import *
@@ -18,6 +18,9 @@ import geometry_msgs.msg
 from scipy.spatial.transform import Rotation as R
 from matplotlib import rcParams
 from matplotlib.ticker import FuncFormatter
+from markers import *
+
+
 
 data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/warmstart_brazos.npz")
 data2 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/tau.npz")
@@ -448,8 +451,6 @@ def plot_results(q_full,fuerzas,tau):
 
 
 
-
-
 def publish_tf(br, position, rpy, frame_id="world", child_frame_id="base_link"):
     t = geometry_msgs.msg.TransformStamped()
     t.header.stamp = rospy.Time.now()
@@ -468,6 +469,56 @@ def publish_tf(br, position, rpy, frame_id="world", child_frame_id="base_link"):
 
     br.sendTransform(t)
 
+def publish_tf_from_matrix(br, T, frame_id="world", child_frame_id="left_foot"):
+    """
+    Publica un tf a partir de una matriz de transformación homogénea 4x4.
+    """
+    t = geometry_msgs.msg.TransformStamped()
+    t.header.stamp = rospy.Time.now()
+    t.header.frame_id = frame_id
+    t.child_frame_id = child_frame_id
+
+    # Extraer traslación y rotación de la matriz homogénea
+    position = T[0:3, 3]
+    rot_matrix = T[0:3, 0:3]
+    quat = R.from_matrix(rot_matrix).as_quat()
+
+    t.transform.translation.x = position[0]
+    t.transform.translation.y = position[1]
+    t.transform.translation.z = position[2]
+
+    t.transform.rotation.x = quat[0]
+    t.transform.rotation.y = quat[1]
+    t.transform.rotation.z = quat[2]
+    t.transform.rotation.w = quat[3]
+
+    br.sendTransform(t)
+
+import pinocchio as pin
+from os.path import join
+# Cargar modelo de NAO con base flotante
+
+model_path = "/home/invitado8/proy_ws/src/nao/nao_utec/urdf/"
+urdf_filename = "naoV40red.urdf"
+urdf_model_path = join(model_path, urdf_filename)
+model = pin.buildModelFromUrdf(urdf_model_path, pin.JointModelFreeFlyer())
+
+
+def center_of_mass_numpy(q_rpy):
+    xyz = q_rpy[0:3]
+    rpy = q_rpy[3:6]
+    q_act = q_rpy[6:]
+
+    quat_xyzw = R.from_euler('xyz', rpy).as_quat()
+    quat = np.array([quat_xyzw[0], quat_xyzw[1], quat_xyzw[2], quat_xyzw[3]])
+
+    q_pin = np.concatenate([xyz, quat, q_act])
+
+    data = model.createData()
+    com =pin.centerOfMass(model, data, q_pin)
+    #com = data.com[0]  # <--- acceso explícito como en tu código simbólico
+
+    return com
 
 def send_joint_states(q_full, rate_hz= 20):
     q_full = np.array(q_full)
@@ -490,7 +541,15 @@ def send_joint_states(q_full, rate_hz= 20):
     rospy.init_node('nao_joint_sender', anonymous=True)
     rate = rospy.Rate(rate_hz)
 
+    bmarker_com = BallMarker(color['GREEN'])
+
+
     for i in range(N):
+
+        #print("COM:",center_of_mass_numpy(q_full[:,i])," PIE IZQ:", fkine_left_foot_constant(q_full[joint_indices["l_leg"],i],q_full[0:6,i],'c')[0:3,3] )
+
+        com = center_of_mass_numpy(q_full[:,i])
+        bmarker_com.xyz([com[0],com[1],0] )
 
         pos = q_full[0:3, i]       # x, y, z
         rpy = q_full[3:6, i]       # roll, pitch, yaw
@@ -498,6 +557,7 @@ def send_joint_states(q_full, rate_hz= 20):
 
         # Publica TF desde world → torso
         publish_tf(br, pos, rpy)
+
         
         jstate = JointState()
         jstate.header.stamp = rospy.Time.now()
@@ -508,6 +568,15 @@ def send_joint_states(q_full, rate_hz= 20):
         jstate.position = np.concatenate([q_actuated, q_extra]).tolist()
 
         pub.publish(jstate)
+
+
+        #p1,p2,p3,p4 = fkine_right_foot_ground(q_full[joint_indices["r_leg"],i],q_full[   joint_indices["f_base"] ,i],"c")
+        #p5,p6,p7,p8 = fkine_left_foot_ground(q_full[joint_indices["l_leg"],i], q_full[ joint_indices["f_base"]  ,i],"c") 
+
+        #points = [p1, p2, p3, p4]
+
+        #print(" ".join(f"{p[2, 3]:.9f}" for p in points))
+
         rate.sleep()
 
 

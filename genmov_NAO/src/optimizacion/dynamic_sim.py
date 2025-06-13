@@ -29,7 +29,18 @@ if __name__ == "__main__":
         spawn_ground_plane=True
     )
 
-    time.sleep(5)
+    robot_id = 1
+    mu = 0.8
+    #p.changeDynamics(0, -1, lateralFriction=mu)
+    #p.changeDynamics(robot_id, robot.joint_dict["RAnkleRoll"].index, lateralFriction=mu)
+    #p.changeDynamics(robot_id, robot.joint_dict["LAnkleRoll"].index, lateralFriction=mu)
+
+    # ground_id = 0  # usa el ID del plano que encontraste
+    # dynamics = p.getDynamicsInfo(ground_id, -1)
+    # lateral_friction = dynamics[1]
+    # print(f"Lateral friction of ground: {lateral_friction}")
+
+    #time.sleep(5)
 
     # Crear lista de nombres de joints válidos (sin dedos)
     joint_names = [
@@ -38,20 +49,20 @@ if __name__ == "__main__":
     ]
 
 
-    joint_velocity_limits = {}
+    # joint_velocity_limits = {}
 
-    for name, joint in robot.joint_dict.items():
-        if "Finger" not in name and "Thumb" not in name:
-            try:
-                max_vel = joint.getMaxVelocity()  # Intenta acceder al límite
-            except AttributeError:
-                # Si no tiene ese método, usamos pybullet directamente
-                joint_index = joint.index
-                joint_info = p.getJointInfo(robot.uid, joint_index)
-                max_vel = joint_info[11]
+    # for name, joint in robot.joint_dict.items():
+    #     if "Finger" not in name and "Thumb" not in name:
+    #         try:
+    #             max_vel = joint.getMaxVelocity()  # Intenta acceder al límite
+    #         except AttributeError:
+    #             # Si no tiene ese método, usamos pybullet directamente
+    #             joint_index = joint.index
+    #             joint_info = p.getJointInfo(robot.uid, joint_index)
+    #             max_vel = joint_info[11]
 
-            joint_velocity_limits[name] = max_vel
-            print(f"{name}: {max_vel:.3f} rad/s")
+    #         joint_velocity_limits[name] = max_vel
+    #         print(f"{name}: {max_vel:.3f} rad/s")
 
 
 
@@ -62,10 +73,10 @@ if __name__ == "__main__":
     qs = q[6:32, 0]  # Tomar los últimos 26 DoF del instante i
     qs1 = q[6:32,1]
     rate = np.ones(26)
-    robot.setAngles(joint_names, qs.tolist(), rate.tolist())
+    robot.setAngles(joint_names, qs.tolist(), 1)
     print("PRIMER Q MANDADO, INICIANDO MOVIMIENTO")
 
-    time.sleep(5)
+    time.sleep(3)
     p.setRealTimeSimulation(1)
 
     try:
@@ -75,7 +86,7 @@ if __name__ == "__main__":
             qs1 = q[6:32,i+1]
             dqs = (qs1 - qs) / 0.05
             rate = np.abs(dqs) / dq_max
-            rate = np.ones(26)*1
+            rate = np.ones(26)*0.25
             robot.setAngles(joint_names, qs.tolist(), rate.tolist())
             time.sleep(0.05)  # para dar tiempo a la simulación real
         
