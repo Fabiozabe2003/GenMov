@@ -6,7 +6,7 @@ import casadi as ca
 # Limits
 # http://doc.aldebaran.com/2-1/family/robots/joints_robot.html
 q_min = [-ca.inf,-ca.inf, -ca.inf , -ca.inf, -ca.inf, -ca.inf,
-    -2.086017, -0.330041, #Chequear Head-Yaw/Pitch
+    -ca.pi/3, -0.330041, #Chequear Head-Yaw/Pitch
     -1.14529, -0.379435, -1.53589, -0.0923279, -1.18944, -0.397761,
     -1.14529, -0.79046, -1.53589, -0.0923279, -1.1863, -0.768992, 
     -2.08567, -0.314159, -2.08567, -1.54462, -1.82387, 0.0, 
@@ -14,7 +14,7 @@ q_min = [-ca.inf,-ca.inf, -ca.inf , -ca.inf, -ca.inf, -ca.inf,
 
 
 q_max = [ ca.inf,ca.inf, ca.inf , ca.inf, ca.inf, ca.inf,
-      2.086017, 0.200015, 
+      ca.pi/3, 0.200015, 
       0.740718, 0.79046, 0.48398, 2.11255, 0.922581, 0.768992,
       0.740718, 0.379435, 0.48398, 2.11255, 0.932006, 0.397761, 
       2.08567, 1.32645, 2.08567, -0.0349066, 1.82387, 1.0,
@@ -63,6 +63,6 @@ tau_max = [1.547, 1.532,
            1.329, 1.7835, 1.547, 1.532, 0.4075, 0.292,
              1.329, 1.783, 1.547, 1.532, 0.4075, 0.292]
 
-tau_max = [x*0.75 for x in tau_max]
+tau_max = [x*0.9 for x in tau_max]
 
 tau_min =[-x for x in tau_max]

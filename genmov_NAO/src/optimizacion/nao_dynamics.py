@@ -40,7 +40,7 @@ def dynamic_matrices_fun(model):
     b = C @ cv + g
 
     # Symmetrize M
-    #M_sym = ca.triu(M) + ca.transpose(ca.triu(M) - ca.diag(ca.diag(M)))
+    M_sym = ca.triu(M) + ca.transpose(ca.triu(M) - ca.diag(ca.diag(M)))
 
     # CasADi functions
     M_fun = ca.Function('M_fun', [cq], [M])

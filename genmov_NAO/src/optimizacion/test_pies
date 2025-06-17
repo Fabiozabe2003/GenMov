@@ -21,7 +21,7 @@ from scipy.spatial.transform import Rotation as R
 # Matrices dinamicas
 model_path = "/home/invitado8/proy_ws/src/nao/nao_utec/urdf/"
 #model_path = "/home/invitado8/.qibullet/1.4.3/"
-urdf_filename = "naoV40red.urdf"
+#urdf_filename = "naoV40red.urdf"
 urdf_filename = "naoV5blue.urdf"
 
 urdf_model_path = join(model_path, urdf_filename)
@@ -33,7 +33,7 @@ Jacobian_contacts, Jacobian_lcontacts, Jacobian_rcontacts = build_Jacobian_conta
 CoM = center_of_mass_fun(model)
 
 
-reconstructed_data, left_contact, right_contact =reconstruct("Step.csv")
+reconstructed_data, left_contact, right_contact =reconstruct("Step2.csv")
 left_hand_points=reconstructed_data["lhand"]
 right_hand_points=reconstructed_data["rhand"]
 left_elbow_points=reconstructed_data["lforearm"]
@@ -66,7 +66,7 @@ joint_indices = {
 
 Dof = 32 # 32 cuando agregue los 6 de la base lotante
 Dof_act = 26  #26 qs actuados
-#N = 35
+#N = 90
 q = SX.sym('q',Dof*N) # variable 'q' de cuerpo completo
 tau = SX.sym('tau',Dof_act*N)  # par para articulaciones actuadas
 f_contact = SX.sym('f_contact',  12*(N_contacts_left+N_contacts_right))  # fuerzas de contacto (12 por pie en el suelo)
@@ -81,7 +81,7 @@ dt = 0.05
 mu = 0.35 # inventado
 
 #total_constraints = Dof_act*(N-1) + 12*(N) + 8*(N-2) + Dof*(N-2) + N
-total_constraints = Dof_act*(N-1) + (N_contacts_left + N_contacts_right)*6 + (N2_contacts_left + N2_contacts_right)*4 + Dof*(N-2) + N + 8*N #4*(2*N - N_contacts_left -N_contacts_right )
+total_constraints = Dof_act*(N-1) + (N_contacts_left + N_contacts_right)*6 + (N2_contacts_left + N2_contacts_right)*4 + Dof*(N-2) + N + 8*N #+ (2*N - N_contacts_left -N_contacts_right)#4*(2*N - N_contacts_left -N_contacts_right )
 
 
 print("Restricciones de g:",total_constraints)
@@ -94,8 +94,8 @@ g=[0]*total_constraints
 idx = 0
 k_fuerzas = 0
 
-p_rfijo = [0.03, -0.05 , 0]
-p_lfijo = [0.03, 0.05 , 0]
+p_rfijo = [0, -0.05, 0]
+p_lfijo = [0, 0.05 , 0]
 
 r_rfijo =  np.array ([[1, 0, 0],
                       [0, 0, 1],
@@ -106,7 +106,18 @@ r_lfijo =  np.array ([[1, 0, 0],
                       [0, -1, 0]]) 
 
 
-q_inicial_deseado = DM.zeros(26)
+
+
+
+q_squat_left = ca.DM([
+    0.0,          # LHipYawPitch
+    0.420624,     # LHipRoll
+    -0.829031,    # LHipPitch
+    2.0944,       # LKneePitch
+    -1.0472,      # LAnklePitch
+    0.0628318     # LAnkleRoll
+])
+
 
 
 for i in range(N):
@@ -125,7 +136,7 @@ for i in range(N):
     #f += 10 * ((q_i_base[0]+0.0015)**2 + (q_i_base[1]+ 0.002)**2 +  (q_i_base[2]-0.3148)**2)
 
     # if i==0:
-    #     f += ca.sumsqr(q_i[6:32] - q_inicial_deseado)
+    #      f += 100*ca.sumsqr(q_i[6:32] - q_inicial_deseado)
 
     # else :
     f += ca.sumsqr(ca.vertcat(*fkine_left_arm(q_i_larm)[0:3,3])-ca.vertcat(*left_hand_points[i]))   # Mano izquierda
@@ -133,14 +144,31 @@ for i in range(N):
     f += ca.sumsqr(ca.vertcat(*fkine_right_arm(q_i_rarm)[0:3,3])-ca.vertcat(*right_hand_points[i]))   # Mano derecha
     f +=  ca.sumsqr(ca.vertcat(*fkine_right_elbow(q_i_rarm)[0:3,3])-ca.vertcat(*right_elbow_points[i]))  # Codo derecho
 
-
     if (left_contact[i]==0):
-        f += ca.sumsqr(ca.vertcat(*fkine_left_foot_constant(q_i_lleg)[0:3,3])-ca.vertcat(*left_foot_points[i]))
+        f += 10*ca.sumsqr(ca.vertcat(*fkine_left_foot_constant(q_i_lleg)[0:3,3])-ca.vertcat(*left_foot_points[i]))
 
+        if i < N-1:
+            q_i1 = q[Dof*(i+1) : Dof*(i+2)] 
+            q_i1_lleg = q_i1[joint_indices["l_leg"]] 
+            weights_lleg = ca.SX([1, 1, 0.5, 0.001, 1.0, 1.0])  # soft on LKneePitch (index 3)
+            dq_lleg = (q_i1_lleg - q_i_lleg) / dt
+            f += ca.sumsqr(weights_lleg * dq_lleg)
 
-        com_xy = CoM(dynamic_q(q_i))[0:2]
+        #f += ca.sumsqr((ca.vertcat(*fkine_left_foot_constant(q_i_lleg)[0:3,3]) - ca.vertcat(*left_foot_points[i]))*ca.vertcat(1, 0.05, 1))
 
-        f +=  10*ca.sumsqr(fkine_right_foot_constant(q_i_rleg,q_i_base,"c")[0:2,3] - com_xy)
+        com = CoM(dynamic_q(q_i))
+        com_xy = com[0:2] + ca.DM([0.0, 0.03])  # REVISAR ESTO 
+        #com_z = com[2]
+        
+        # g[idx] = ca.sumsqr(fkine_right_foot_constant(q_i_rleg,q_i_base,"c")[0:2,3] - com_xy)
+        # lbg[idx] = 0
+        # ubg[idx] = 0.02**2
+        # idx += 1
+        f +=  100*ca.sumsqr(fkine_right_foot_constant(q_i_rleg,q_i_base,"c")[0:2,3] - com_xy)
+
+        #f += 100*ca.sumsqr(com_z - 0.2)
+        f += 10*ca.sumsqr(q_i_rleg[3]+ 0.092) # Pie de apoyo
+        #f += 10*ca.sumsqr(q_i_rleg[5]- 0.29)  
 
 
     c1z,c2z,c3z,c4z = fkine_left_foot_ground(q_i_lleg,q_i_base,"c")
@@ -162,14 +190,42 @@ for i in range(N):
     idx +=1
 
 
+    # com_xy = CoM(dynamic_q(q_i))[0:2]
+
+    # f += 100*ca.sumsqr(fkine_left_foot_constant(q_i_lleg,q_i_base,"c")[0:2,3] - com_xy)
+
     
     if (right_contact[i]==0):  # Pie levantado, seguimos referencia
-        f += ca.sumsqr(ca.vertcat(*fkine_right_foot_constant(q_i_rleg)[0:3,3])-ca.vertcat(*right_foot_points[i]))
+        f += 10*ca.sumsqr(ca.vertcat(*fkine_right_foot_constant(q_i_rleg)[0:3,3])-ca.vertcat(*right_foot_points[i]))
+
+        #f += ca.sumsqr((ca.vertcat(*fkine_right_foot_constant(q_i_rleg)[0:3,3]) - ca.vertcat(*right_foot_points[i]))*ca.vertcat(0.5, 0.5, 5))
+
+
+        if i < N-1:
+            q_i1 = q[Dof*(i+1) : Dof*(i+2)] 
+            q_i1_rleg = q_i1[joint_indices["r_leg"]] 
+            weights_rleg = ca.SX([1, 1, 0.5, 0.001, 1.0, 1.0])  # soft on RKneePitch (index 3)
+            dq_rleg = (q_i1_rleg - q_i_rleg) / dt
+            f += ca.sumsqr(weights_rleg * dq_rleg)
+
+
+
+        #f += 10*ca.sumsqr(q_i_rleg[3] - 0.6) # only in swing phase
+
 
         
-        com_xy = CoM(dynamic_q(q_i))[0:2]
+        com = CoM(dynamic_q(q_i))
+        com_xy = com[0:2] + ca.DM([0.00, -0.03]) 
+        #com_z = com[2]
+        
+        f += 100*ca.sumsqr(fkine_left_foot_constant(q_i_lleg,q_i_base,"c")[0:2,3] - com_xy) # CENTRO DE MASA COMO COSTO
 
-        f += 10*ca.sumsqr(fkine_left_foot_constant(q_i_lleg,q_i_base,"c")[0:2,3] - com_xy)
+        #f +=  100*ca.sumsqr(com_z - 0.20)
+
+        #f += 100*ca.sumsqr(q_i_lleg[2:6] - q_squat_left[2:6])
+        f += 10*ca.sumsqr(q_i_lleg[3]+ 0.092) # Pie de apoyo
+        #f += 10*ca.sumsqr(q_i_lleg[5]- 0.29)
+
 
     c5z,c6z,c7z,c8z = fkine_right_foot_ground(q_i_rleg,q_i_base,"c")
     
@@ -244,7 +300,7 @@ for i in range(N):
         q_i1 = q[Dof*(i+1):Dof*(i+2)]
         dq_i = (q_i1-q_i)/dt
 
-        f += 0.0015*dq_i.T@dq_i
+        f += 0.001*(dq_i.T)@(dq_i)
 
         for j in range(Dof_act):
             g[idx] = dq_i[j + 6]
@@ -269,6 +325,7 @@ for i in range(N):
         if i<N-2:
             q_i2 = q[Dof*(i+2):Dof*(i+3)]
             ddq_i = (q_i2 - 2*q_i1 + q_i)/ dt**2
+            f += 0.00001*(ddq_i[6:].T)@(ddq_i[6:])
 
             rpy = q_i[3:6]
             drpy = dq_i[3:6]
@@ -337,15 +394,15 @@ nlp['g'] = g_all
 opts={"max_iter_eig": 500}
 
 
-opts = { 
-    'ipopt.linear_solver': 'ma86',
-    'ipopt.tol': 1e-3,  # tolerancia general más laxa
-    'ipopt.constr_viol_tol': 1e-5,  # tolerancia en restricciones
-    'ipopt.acceptable_tol': 1e-3,  # tolerancia aceptable (para cortar antes)
-    'ipopt.acceptable_constr_viol_tol': 1e-3,
-    'ipopt.acceptable_iter': 5,  # si se alcanza tolerancia aceptable por 5 iteraciones, termina
-    'ipopt.max_iter': 500
-}
+# opts = { 
+#     'ipopt.linear_solver': 'ma86',
+#     'ipopt.tol': 1e-4,  # tolerancia general más laxa
+#     'ipopt.constr_viol_tol': 1e-5,  # tolerancia en restricciones
+#     'ipopt.acceptable_tol': 1e-4,  # tolerancia aceptable (para cortar antes)
+#     'ipopt.acceptable_constr_viol_tol': 1e-4,
+#     'ipopt.acceptable_iter': 5,  # si se alcanza tolerancia aceptable por 5 iteraciones, termina
+#     'ipopt.max_iter': 500
+# }
 
 solver = nlpsol('solver','ipopt',nlp,opts)
 
@@ -379,8 +436,8 @@ print( fc0.shape)
 print(Dof*N)
 print(Dof_act*N) 
 print(12*(N_contacts_left +  N_contacts_right))
-# q0 = np.zeros(Dof*N)
-# tau0 = np.zeros(Dof_act*N)
+q0 = np.zeros(Dof*N)
+tau0 = np.zeros(Dof_act*N)
 fc0 = np.zeros(12*(N_contacts_left+N_contacts_right))
 x_init = ca.vertcat(ca.DM(q0), ca.DM(tau0), ca.DM(fc0))
 

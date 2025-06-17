@@ -516,7 +516,7 @@ def center_of_mass_numpy(q_rpy):
 
     data = model.createData()
     com =pin.centerOfMass(model, data, q_pin)
-    #com = data.com[0]  # <--- acceso explícito como en tu código simbólico
+    #com = data.com[0]  
 
     return com
 
@@ -549,7 +549,10 @@ def send_joint_states(q_full, rate_hz= 20):
         #print("COM:",center_of_mass_numpy(q_full[:,i])," PIE IZQ:", fkine_left_foot_constant(q_full[joint_indices["l_leg"],i],q_full[0:6,i],'c')[0:3,3] )
 
         com = center_of_mass_numpy(q_full[:,i])
+
         bmarker_com.xyz([com[0],com[1],0] )
+        
+        print(com[2])
 
         pos = q_full[0:3, i]       # x, y, z
         rpy = q_full[3:6, i]       # roll, pitch, yaw
@@ -558,7 +561,8 @@ def send_joint_states(q_full, rate_hz= 20):
         # Publica TF desde world → torso
         publish_tf(br, pos, rpy)
 
-        
+        publish_tf_from_matrix(br, fkine_left_foot_constant(q_full[joint_indices["l_leg"],i],q_full[0:6,i],'c'))
+
         jstate = JointState()
         jstate.header.stamp = rospy.Time.now()
         jstate.name = jnames
@@ -617,4 +621,4 @@ if __name__ == '__main__':
     q_full = np.array(q)
     #plt.figure(figsize=(10, 6))
     send_joint_states(q_full)
-    plot_results(q_full,fuerzas_resultado,tau_resultado)
+    #plot_results(q_full,fuerzas_resultado,tau_resultado)
