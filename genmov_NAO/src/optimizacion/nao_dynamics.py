@@ -13,7 +13,7 @@ def center_of_mass_fun(model):
     cq = ca.SX.sym("q", model.nq)
 
     # Calcular el centro de masa con CasADi
-    com = cpin.centerOfMass(cmodel, cdata, cq)
+    com = cpin.centerOfMass(cmodel, cdata, cq,False)
 
     # Extraer el vector 3D del centro de masa del sistema completo
     #com = cdata.com[0]

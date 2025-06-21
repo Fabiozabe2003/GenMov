@@ -89,6 +89,9 @@ if __name__ == "__main__":
             # rate = np.abs(dqs) / dq_max
             rate = np.ones(26)*1
             robot.setAngles(joint_names, qs.tolist(), rate.tolist())
+
+
+            
             time.sleep(0.05)  # para dar tiempo a la simulación real
         
 

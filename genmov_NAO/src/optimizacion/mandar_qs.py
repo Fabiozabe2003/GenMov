@@ -32,7 +32,6 @@ def joints_all(session, q, inicial=False):
 
     start_time = time.perf_counter()
 
-    time_list=[0.05]*26
 
     if inicial:
         motion.angleInterpolationWithSpeed(joint_names, q, 0.25)
@@ -109,8 +108,8 @@ def main():
     # q_full = data["q_smooth"]
     # q_full = np.array(q_full)
 
-    robot_ip = "192.168.10.104"
-    #robot_ip = "169.254.38.159"# azul (main character)
+    #robot_ip = "192.168.10.101"
+    robot_ip = "169.254.38.159"# azul (main character)
     # robot_ip = "169.254.199.108" #azul español (cinde)
     #robot_ip = "169.254.129.144" # naranja
     robot_port = 9559

@@ -499,7 +499,7 @@ from os.path import join
 # Cargar modelo de NAO con base flotante
 
 model_path = "/home/invitado8/proy_ws/src/nao/nao_utec/urdf/"
-urdf_filename = "naoV40red.urdf"
+urdf_filename = "naoV5blue.urdf"
 urdf_model_path = join(model_path, urdf_filename)
 model = pin.buildModelFromUrdf(urdf_model_path, pin.JointModelFreeFlyer())
 
@@ -509,13 +509,13 @@ def center_of_mass_numpy(q_rpy):
     rpy = q_rpy[3:6]
     q_act = q_rpy[6:]
 
-    quat_xyzw = R.from_euler('xyz', rpy).as_quat()
+    quat_xyzw = R.from_euler('zyx', [rpy[2],rpy[1],rpy[0]]).as_quat()
     quat = np.array([quat_xyzw[0], quat_xyzw[1], quat_xyzw[2], quat_xyzw[3]])
 
     q_pin = np.concatenate([xyz, quat, q_act])
 
     data = model.createData()
-    com =pin.centerOfMass(model, data, q_pin)
+    com =pin.centerOfMass(model, data, q_pin, False)
     #com = data.com[0]  
 
     return com

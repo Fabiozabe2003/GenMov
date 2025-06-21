@@ -28,7 +28,7 @@ dq_max = [8.26797, 7.19047,
           8.26797,7.19407,8.26797,7.19407,24.6229, 8.33 #last speed is from hand (which is none)
         ]
 
-dq_max = [x/4 for x in dq_max]
+dq_max = [x/9 for x in dq_max]
 
 dq_min=[-x for x in dq_max]
 

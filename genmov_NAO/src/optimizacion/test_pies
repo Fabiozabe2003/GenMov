@@ -40,13 +40,15 @@ left_elbow_points=reconstructed_data["lforearm"]
 right_elbow_points=reconstructed_data["rforearm"]
 left_foot_points = reconstructed_data["lfoot"]
 right_foot_points = reconstructed_data["rfoot"]
+left_knee_points = reconstructed_data["lknee"]
+right_knee_points = reconstructed_data["rknee"]
 
 N=len(left_hand_points)
 
 print("TENEMOS N:",N)
 
 #right_contact = np.ones(N,dtype=int )   # reconstructed_data["right_contact"]
-left_contact = np.ones(N,dtype=int)    #reconstructed_data["left_contact"]
+#left_contact = np.ones(N,dtype=int)    #reconstructed_data["left_contact"]
 
 # Cantidad de puntos en contacto con el suelo (que implican fuerzas de contacto)
 N_contacts_right = int(sum(right_contact))
@@ -145,14 +147,16 @@ for i in range(N):
     f +=  ca.sumsqr(ca.vertcat(*fkine_right_elbow(q_i_rarm)[0:3,3])-ca.vertcat(*right_elbow_points[i]))  # Codo derecho
 
     if (left_contact[i]==0):
-        f += 10*ca.sumsqr(ca.vertcat(*fkine_left_foot_constant(q_i_lleg)[0:3,3])-ca.vertcat(*left_foot_points[i]))
+        f += ca.sumsqr(ca.vertcat(*fkine_left_foot_constant(q_i_lleg)[0:3,3])-ca.vertcat(*left_foot_points[i]))
+
+        f += ca.sumsqr(ca.vertcat(*fkine_left_knee(q_i_lleg)[0:3,3])-ca.vertcat(*left_knee_points[i]))
 
         if i < N-1:
             q_i1 = q[Dof*(i+1) : Dof*(i+2)] 
             q_i1_lleg = q_i1[joint_indices["l_leg"]] 
-            weights_lleg = ca.SX([1, 1, 0.5, 0.001, 1.0, 1.0])  # soft on LKneePitch (index 3)
+            weights_lleg = ca.SX([1, 3, 0.5, 0.001, 1.0, 1.0])  # soft on LKneePitch (index 3)
             dq_lleg = (q_i1_lleg - q_i_lleg) / dt
-            f += ca.sumsqr(weights_lleg * dq_lleg)
+            #f += ca.sumsqr(weights_lleg * dq_lleg)
 
         #f += ca.sumsqr((ca.vertcat(*fkine_left_foot_constant(q_i_lleg)[0:3,3]) - ca.vertcat(*left_foot_points[i]))*ca.vertcat(1, 0.05, 1))
 
@@ -196,7 +200,9 @@ for i in range(N):
 
     
     if (right_contact[i]==0):  # Pie levantado, seguimos referencia
-        f += 10*ca.sumsqr(ca.vertcat(*fkine_right_foot_constant(q_i_rleg)[0:3,3])-ca.vertcat(*right_foot_points[i]))
+        f += ca.sumsqr(ca.vertcat(*fkine_right_foot_constant(q_i_rleg)[0:3,3])-ca.vertcat(*right_foot_points[i]))
+
+        f += ca.sumsqr(ca.vertcat(*fkine_right_knee(q_i_rleg)[0:3,3])-ca.vertcat(*right_knee_points[i]))
 
         #f += ca.sumsqr((ca.vertcat(*fkine_right_foot_constant(q_i_rleg)[0:3,3]) - ca.vertcat(*right_foot_points[i]))*ca.vertcat(0.5, 0.5, 5))
 
@@ -204,9 +210,9 @@ for i in range(N):
         if i < N-1:
             q_i1 = q[Dof*(i+1) : Dof*(i+2)] 
             q_i1_rleg = q_i1[joint_indices["r_leg"]] 
-            weights_rleg = ca.SX([1, 1, 0.5, 0.001, 1.0, 1.0])  # soft on RKneePitch (index 3)
+            weights_rleg = ca.SX([1, 3, 0.5, 0.001, 1.0, 1.0])  # soft on RKneePitch (index 3)
             dq_rleg = (q_i1_rleg - q_i_rleg) / dt
-            f += ca.sumsqr(weights_rleg * dq_rleg)
+            #f += ca.sumsqr(weights_rleg * dq_rleg)
 
 
 
@@ -300,7 +306,7 @@ for i in range(N):
         q_i1 = q[Dof*(i+1):Dof*(i+2)]
         dq_i = (q_i1-q_i)/dt
 
-        f += 0.001*(dq_i.T)@(dq_i)
+        #f += 0.001*(dq_i.T)@(dq_i)
 
         for j in range(Dof_act):
             g[idx] = dq_i[j + 6]
@@ -394,15 +400,15 @@ nlp['g'] = g_all
 opts={"max_iter_eig": 500}
 
 
-# opts = { 
-#     'ipopt.linear_solver': 'ma86',
-#     'ipopt.tol': 1e-4,  # tolerancia general más laxa
-#     'ipopt.constr_viol_tol': 1e-5,  # tolerancia en restricciones
-#     'ipopt.acceptable_tol': 1e-4,  # tolerancia aceptable (para cortar antes)
-#     'ipopt.acceptable_constr_viol_tol': 1e-4,
-#     'ipopt.acceptable_iter': 5,  # si se alcanza tolerancia aceptable por 5 iteraciones, termina
-#     'ipopt.max_iter': 500
-# }
+opts = { 
+    'ipopt.linear_solver': 'ma86',
+    'ipopt.tol': 1e-4,  # tolerancia general más laxa
+    'ipopt.constr_viol_tol': 1e-5,  # tolerancia en restricciones
+    'ipopt.acceptable_tol': 1e-4,  # tolerancia aceptable (para cortar antes)
+    'ipopt.acceptable_constr_viol_tol': 1e-4,
+    'ipopt.acceptable_iter': 5,  # si se alcanza tolerancia aceptable por 5 iteraciones, termina
+    'ipopt.max_iter': 500
+}
 
 solver = nlpsol('solver','ipopt',nlp,opts)
 
