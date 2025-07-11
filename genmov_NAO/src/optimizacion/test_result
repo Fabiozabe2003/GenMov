@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-
 from forward_kinematics import *
 from nao_dynamics import *
 from nao_jacobian import *
@@ -8,8 +7,8 @@ from nao_limits import *
 from read_data import *
 import time
 import numpy as np
-from nao_skills import *
 import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
 from mpl_toolkits.mplot3d import Axes3D
 import rospy
 from sensor_msgs.msg import JointState
@@ -18,13 +17,22 @@ import geometry_msgs.msg
 from scipy.spatial.transform import Rotation as R
 from matplotlib import rcParams
 from matplotlib.ticker import FuncFormatter
+from matplotlib.patches import Rectangle, Wedge
+from matplotlib.patches import PathPatch
+from matplotlib.path import Path
 from markers import *
+import pinocchio as pin
+from os.path import join
 
 
+#data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/warmstart_brazos.npz")
+#data2 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/tau.npz")
+#data3 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/fuerzas.npz")
 
-data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/warmstart_brazos.npz")
-data2 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/tau.npz")
-data3 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/fuerzas.npz")
+dir="caso3"
+data = np.load(f"/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/output_trajectory/{dir}/q.npz")
+data2 = np.load(f"/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/output_trajectory/{dir}/tau.npz")
+data3 = np.load(f"/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/output_trajectory/{dir}/fuerzas.npz")
 
 q = data['q_full']
 tau_resultado = data2['tau_resultado']
@@ -33,18 +41,491 @@ fuerzas_resultado = data3['fuerzas_resultado']
 
 dt = 0.05
 mu = 0.35 # inventado
-reconstructed_data, left_contact, right_contact =reconstruct("Step.csv")
+reconstructed_data, left_contact, right_contact =reconstruct(f"/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/motions/{dir}.csv")
 left_hand_points=reconstructed_data["lhand"]
 right_hand_points=reconstructed_data["rhand"]
+
 left_elbow_points=reconstructed_data["lforearm"]
 right_elbow_points=reconstructed_data["rforearm"]
+
 left_foot_points = reconstructed_data["lfoot"]
 right_foot_points = reconstructed_data["rfoot"]
+
+left_knee_points = reconstructed_data["lknee"]
+right_knee_points = reconstructed_data["rknee"]
 
 N=len(left_hand_points)
 
 
-def plot_results(q_full,fuerzas,tau):
+# Cargar modelo de NAO con base flotante
+
+model_path = "/home/invitado8/proy_ws/src/nao/nao_utec/urdf/"
+urdf_filename = "naoV5blue.urdf"
+urdf_model_path = join(model_path, urdf_filename)
+model = pin.buildModelFromUrdf(urdf_model_path, pin.JointModelFreeFlyer())
+
+
+def center_of_mass_numpy(q_rpy):
+    xyz = q_rpy[0:3]
+    rpy = q_rpy[3:6]
+    q_act = q_rpy[6:]
+
+    quat_xyzw = R.from_euler('zyx', [rpy[2],rpy[1],rpy[0]]).as_quat()
+    quat = np.array([quat_xyzw[0], quat_xyzw[1], quat_xyzw[2], quat_xyzw[3]])
+
+    q_pin = np.concatenate([xyz, quat, q_act])
+
+    data = model.createData()
+    com =pin.centerOfMass(model, data, q_pin, False)
+    #com = data.com[0]  
+
+    return com
+
+
+from matplotlib.animation import FuncAnimation
+
+def plot_Com_opt_animated(q_full):
+    rcParams.update({
+        "font.family": "serif",
+        "font.size": 12,
+        "axes.titlesize": 14,
+        "axes.labelsize": 12,
+        "legend.fontsize": 10,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "lines.linewidth": 1.5,
+        "figure.dpi": 100
+    })
+
+    N = q_full.shape[1]
+    center_of_mass = np.zeros((N, 2))  # x, y
+
+    for i in range(N):
+        center_of_mass[i] = center_of_mass_numpy(q_full[:, i])[0:2]
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    centers = [(-0.05, -0.016), (0.05, -0.016)]
+    colors_foot = ['red', 'blue']
+    labels = ['Pie derecho', 'Pie izquierdo']
+
+    foot_patches = []  # <-- para leyenda
+
+    def draw_foot(ax, cx, cy, color, label):
+        rect_width = 0.085
+        rect_height = 0.148 - rect_width / 2
+        semi_radius = rect_width / 2
+
+        lower_left_x = cx - rect_width / 2
+        lower_left_y = cy - rect_height / 2
+
+        lower_right_x = lower_left_x + rect_width
+        lower_right_y = lower_left_y
+
+        top_y = lower_left_y + rect_height
+        arc_center_x = cx
+        arc_center_y = top_y
+
+        arc = Path.arc(0, 180)
+        arc_vertices = arc.vertices * [semi_radius, semi_radius] + [arc_center_x, arc_center_y]
+        arc_codes = arc.codes
+
+        verts = []
+        codes = []
+
+        verts.append(arc_vertices[0])
+        codes.append(Path.MOVETO)
+        verts.extend(arc_vertices[1:])
+        codes.extend(arc_codes[1:])
+        verts.append((lower_left_x, lower_left_y))
+        codes.append(Path.LINETO)
+        verts.append((lower_right_x, lower_right_y))
+        codes.append(Path.LINETO)
+        verts.append((arc_vertices[0]))
+        codes.append(Path.CLOSEPOLY)
+
+        path = Path(verts, codes)
+        patch = PathPatch(path, edgecolor=color, facecolor='none', linewidth=1.5, label=label)
+        ax.add_patch(patch)
+        foot_patches.append(patch)
+
+    for (cx, cy), color, label in zip(centers, colors_foot, labels):
+        draw_foot(ax, cx, cy, color, label)
+
+    # --- Datos de contacto ---
+    color_left_raised = 'red'
+    color_right_raised = 'blue'
+    color_both_contact = 'gray'
+
+    segments = []
+    seg_start = 0
+    current_state = (left_contact[0], right_contact[0])
+
+    for i in range(1, N):
+        state = (left_contact[i], right_contact[i])
+        if state != current_state:
+            segments.append((seg_start, i, current_state))
+            seg_start = i
+            current_state = state
+    segments.append((seg_start, N, current_state))
+
+    lines = []
+    seg_colors = []
+    seg_labels = []
+
+    for _, _, state in segments:
+        line, = ax.plot([], [], lw=2)
+        lines.append(line)
+
+        if state == (0, 1):
+            seg_colors.append(color_left_raised)
+            seg_labels.append('Pie derecho soporte')
+        elif state == (1, 0):
+            seg_colors.append(color_right_raised)
+            seg_labels.append('Pie izquierdo soporte')
+        else:
+            seg_colors.append(color_both_contact)
+            seg_labels.append('Ambos pies en contacto')
+
+    ax.grid(True, which='both', color='gray', linestyle='--', linewidth=0.5)
+    ax.set_xlim(-0.15, 0.15)
+    ax.set_ylim(-0.1, 0.1)
+    ax.set_xlabel('Y [m]')
+    ax.set_ylabel('X [m]')
+    ax.set_title('Proyección del centro de masa en el plano XY (vista inferior)')
+    ax.set_aspect('equal')
+
+    def init():
+        for line in lines:
+            line.set_data([], [])
+        return lines
+
+    def animate(frame):
+        for idx, (start, end, _) in enumerate(segments):
+            if frame >= start:
+                stop = min(frame + 1, end)
+                x_seg = center_of_mass[start:stop, 0]
+                y_seg = center_of_mass[start:stop, 1]
+                lines[idx].set_data(y_seg, x_seg)
+                lines[idx].set_color(seg_colors[idx])
+        return lines
+
+    ani = FuncAnimation(fig, animate, frames=N, init_func=init,
+                        blit=True, interval=100, repeat=False)
+
+    # Combinar patches + líneas para la leyenda
+    handles = foot_patches.copy()
+    labels = [patch.get_label() for patch in foot_patches]
+
+    # Solo etiquetas únicas para fases
+    unique_phase = {}
+    for col, lab in zip(seg_colors, seg_labels):
+        unique_phase[lab] = col
+    for lab, col in unique_phase.items():
+        h = plt.Line2D([0], [0], color=col, lw=2)
+        handles.append(h)
+        labels.append(lab)
+
+    ax.legend(handles, labels)
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_Com_real():
+    rcParams.update({
+        "font.family": "serif",
+        "font.size": 12,
+        "axes.titlesize": 14,
+        "axes.labelsize": 12,
+        "legend.fontsize": 10,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "lines.linewidth": 1.5,
+        "figure.dpi": 100
+    })
+
+    N = q_full.shape[1]
+    center_of_mass = np.zeros((N, 2))  # x, y
+    data = np.load(f"/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/com/{dir}.npz")
+    center_of_mass = data['com_data'].T
+    print(center_of_mass.shape)
+    
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    centers = [(-0.05, -0.016), (0.05, -0.016)]
+    colors_foot = ['red', 'blue']
+    labels = ['Pie derecho', 'Pie izquierdo']
+
+    foot_patches = []  # <-- para leyenda
+
+    def draw_foot(ax, cx, cy, color, label):
+        rect_width = 0.085
+        rect_height = 0.148 - rect_width / 2
+        semi_radius = rect_width / 2
+
+        lower_left_x = cx - rect_width / 2
+        lower_left_y = cy - rect_height / 2
+
+        lower_right_x = lower_left_x + rect_width
+        lower_right_y = lower_left_y
+
+        top_y = lower_left_y + rect_height
+        arc_center_x = cx
+        arc_center_y = top_y
+
+        arc = Path.arc(0, 180)
+        arc_vertices = arc.vertices * [semi_radius, semi_radius] + [arc_center_x, arc_center_y]
+        arc_codes = arc.codes
+
+        verts = []
+        codes = []
+
+        verts.append(arc_vertices[0])
+        codes.append(Path.MOVETO)
+        verts.extend(arc_vertices[1:])
+        codes.extend(arc_codes[1:])
+        verts.append((lower_left_x, lower_left_y))
+        codes.append(Path.LINETO)
+        verts.append((lower_right_x, lower_right_y))
+        codes.append(Path.LINETO)
+        verts.append((arc_vertices[0]))
+        codes.append(Path.CLOSEPOLY)
+
+        path = Path(verts, codes)
+        patch = PathPatch(path, edgecolor=color, facecolor='none', linewidth=1.5, label=label)
+        ax.add_patch(patch)
+        foot_patches.append(patch)
+
+    for (cx, cy), color, label in zip(centers, colors_foot, labels):
+        draw_foot(ax, cx, cy, color, label)
+
+    # --- Datos de contacto ---
+    color_left_raised = 'red'
+    color_right_raised = 'blue'
+    color_both_contact = 'gray'
+
+    segments = []
+    seg_start = 0
+    current_state = (left_contact[0], right_contact[0])
+
+    for i in range(1, N):
+        state = (left_contact[i], right_contact[i])
+        if state != current_state:
+            segments.append((seg_start, i, current_state))
+            seg_start = i
+            current_state = state
+    segments.append((seg_start, N, current_state))
+
+    lines = []
+    seg_colors = []
+    seg_labels = []
+
+    for _, _, state in segments:
+        line, = ax.plot([], [], lw=2)
+        lines.append(line)
+
+        if state == (0, 1):
+            seg_colors.append(color_left_raised)
+            seg_labels.append('Pie derecho soporte')
+        elif state == (1, 0):
+            seg_colors.append(color_right_raised)
+            seg_labels.append('Pie izquierdo soporte')
+        else:
+            seg_colors.append(color_both_contact)
+            seg_labels.append('Ambos pies en contacto')
+
+    ax.grid(True, which='both', color='gray', linestyle='--', linewidth=0.5)
+    ax.set_xlim(-0.15, 0.15)
+    ax.set_ylim(-0.1, 0.1)
+    ax.set_xlabel('Y [m]')
+    ax.set_ylabel('X [m]')
+    ax.set_title('Proyección del centro de masa en el plano XY (vista inferior)')
+    ax.set_aspect('equal')
+
+    def init():
+        for line in lines:
+            line.set_data([], [])
+        return lines
+
+    def animate(frame):
+        for idx, (start, end, _) in enumerate(segments):
+            if frame >= start:
+                stop = min(frame + 1, end)
+                x_seg = center_of_mass[start:stop, 0]
+                y_seg = center_of_mass[start:stop, 1]
+                lines[idx].set_data(y_seg, x_seg)
+                lines[idx].set_color(seg_colors[idx])
+        return lines
+
+    ani = FuncAnimation(fig, animate, frames=N, init_func=init,
+                        blit=True, interval=100, repeat=False)
+
+    # Combinar patches + líneas para la leyenda
+    handles = foot_patches.copy()
+    labels = [patch.get_label() for patch in foot_patches]
+
+    # Solo etiquetas únicas para fases
+    unique_phase = {}
+    for col, lab in zip(seg_colors, seg_labels):
+        unique_phase[lab] = col
+    for lab, col in unique_phase.items():
+        h = plt.Line2D([0], [0], color=col, lw=2)
+        handles.append(h)
+        labels.append(lab)
+
+    ax.legend(handles, labels)
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_Com_opt(q_full):
+    rcParams.update({
+        "font.family": "serif",
+        "font.size": 12,
+        "axes.titlesize": 14,
+        "axes.labelsize": 12,
+        "legend.fontsize": 10,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "lines.linewidth": 1.5,
+        "figure.dpi": 100
+    })
+
+    N = q_full.shape[1]
+    center_of_mass = np.zeros((N, 2))  # x, y
+
+    for i in range(N):
+        center_of_mass[i] = center_of_mass_numpy(q_full[:, i])[0:2]
+
+    # Imagen de fondo
+    #img = mpimg.imread('/home/invitado8/Pictures/support_polygon.png')
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    #xmax = 0.15; xmin = -0.15
+    #ymax = 0.08; ymin = -0.07
+
+    #ax.imshow(img, extent=[xmin, xmax, ymin, ymax], aspect='equal', alpha=0.5)
+
+    # Dimensiones de la huella
+    rect_width = 0.085
+    rect_height = 0.148 - rect_width / 2  # para dejar espacio al arco
+    semi_radius = rect_width / 2
+
+    # Centro de cada pie
+    centers = [(-0.05, -0.016), (0.05, -0.016)]
+    colors = ['red', 'blue']
+    labels = ['Pie derecho', 'Pie izquierdo']
+
+    def draw_foot(ax, cx, cy, color, label):
+    # Parámetros
+        rect_width = 0.085
+        rect_height = 0.148 - rect_width / 2
+        semi_radius = rect_width / 2
+
+        # Esquinas y centro
+        lower_left_x = cx - rect_width / 2
+        lower_left_y = cy - rect_height / 2
+
+        lower_right_x = lower_left_x + rect_width
+        lower_right_y = lower_left_y
+
+        top_left_x = lower_left_x
+        top_right_x = lower_right_x
+        top_y = lower_left_y + rect_height
+
+        arc_center_x = cx
+        arc_center_y = top_y
+
+        # Crear arco: derecha a izquierda (0° → 180°)
+        arc = Path.arc(0, 180)  # CCW de derecha a izquierda
+        arc_vertices = arc.vertices * [semi_radius, semi_radius] + [arc_center_x, arc_center_y]
+        arc_codes = arc.codes
+
+        verts = []
+        codes = []
+
+        # Empieza en top-right (primer punto del arco)
+        verts.append(arc_vertices[0])
+        codes.append(Path.MOVETO)
+
+        # Arco
+        verts.extend(arc_vertices[1:])
+        codes.extend(arc_codes[1:])
+
+        # Línea vertical down: top-left → bottom-left
+        verts.append((lower_left_x, lower_left_y))
+        codes.append(Path.LINETO)
+
+        # Línea horizontal: bottom-left → bottom-right
+        verts.append((lower_right_x, lower_right_y))
+        codes.append(Path.LINETO)
+
+        # Cerrar
+        verts.append((arc_vertices[0]))  # volver al inicio para cerrar bien
+        codes.append(Path.CLOSEPOLY)
+
+        path = Path(verts, codes)
+        patch = PathPatch(path, edgecolor=color, facecolor='none', linewidth=1.5, label=label)
+        ax.add_patch(patch)
+
+    # Dibujar ambos pies
+    for (cx, cy), color, label in zip(centers, colors, labels):
+        draw_foot(ax, cx, cy, color, label)
+
+    # --- Trayectoria del CoM ---
+    color_left_raised = 'red'
+    color_right_raised = 'blue'
+    color_both_contact = 'gray'
+
+    seg_start = 0
+    current_state = (left_contact[0], right_contact[0])
+
+    for i in range(1, N):
+        state = (left_contact[i], right_contact[i])
+        if state != current_state:
+            x_seg = center_of_mass[seg_start:i+1, 0]
+            y_seg = center_of_mass[seg_start:i+1, 1]
+
+            if current_state == (0, 1):
+                ax.plot(y_seg, x_seg, color=color_left_raised, label='Pie derecho en soporte')
+            elif current_state == (1, 0):
+                ax.plot(y_seg, x_seg, color=color_right_raised, label='Pie izquierdo en soporte')
+            else:
+                ax.plot(y_seg, x_seg, color=color_both_contact, label='Ambos pies en contacto')
+
+            seg_start = i
+            current_state = state
+
+    # Último segmento
+    x_seg = center_of_mass[seg_start:, 0]
+    y_seg = center_of_mass[seg_start:, 1]
+
+    if current_state == (0, 1):
+        ax.plot(y_seg, x_seg, color=color_left_raised, label='Pie izquierdo levantado')
+    elif current_state == (1, 0):
+        ax.plot(y_seg, x_seg, color=color_right_raised, label='Pie derecho levantado')
+    else:
+        ax.plot(y_seg, x_seg, color=color_both_contact, label='Ambos pies en contacto')
+
+    #ax.set_xticks(np.arange(xmin, xmax + 0.01, 0.05))
+    #ax.set_yticks(np.arange(ymin, ymax + 0.01, 0.05))
+    ax.grid(True, which='both', color='gray', linestyle='--', linewidth=0.5)
+
+    ax.set_xlabel('Y [m]')
+    ax.set_ylabel('X [m]')
+    ax.set_title('Proyección del Centro de Masa en plano XY (vista inferior)')
+    ax.set_aspect('equal')
+
+    handles, labels = ax.get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    ax.legend(by_label.values(), by_label.keys())
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_results_arms(q_full):
     jnames = [
         "HeadYaw", "HeadPitch",
         "LHipYawPitch", "LHipRoll", "LHipPitch", "LKneePitch", "LAnklePitch", "LAnkleRoll",
@@ -112,22 +593,22 @@ def plot_results(q_full,fuerzas,tau):
     # Subplot 1: X
     fig.suptitle('Evolución temporal de la posición de la mano izquierda',y=1)
 
-    axs[0].plot(x_deseado_lhand, label='x deseado', linestyle='--')
-    axs[0].plot(x_obtenido_lhand, label='x obtenido')
+    axs[0].plot(x_deseado_lhand, label='x objetivo', linestyle='--')
+    axs[0].plot(x_obtenido_lhand, label='x optimizado')
     axs[0].set_ylabel('x (m)')
     axs[0].legend()
     axs[0].grid(True)
 
     # Subplot 2: Y
-    axs[1].plot(y_deseado_lhand, label='y deseado', linestyle='--')
-    axs[1].plot(y_obtenido_lhand, label='y obtenido')
+    axs[1].plot(y_deseado_lhand, label='y objetivo', linestyle='--')
+    axs[1].plot(y_obtenido_lhand, label='y optimizado')
     axs[1].set_ylabel('y (m)')
     axs[1].legend()
     axs[1].grid(True)
 
     # Subplot 3: Z
-    axs[2].plot(z_deseado_lhand, label='z deseado', linestyle='--')
-    axs[2].plot(z_obtenido_lhand, label='z obtenido')
+    axs[2].plot(z_deseado_lhand, label='z objetivo', linestyle='--')
+    axs[2].plot(z_obtenido_lhand, label='z optimizado')
     axs[2].set_ylabel('z (m)')
     axs[2].set_xlabel('Tiempo (s)')
     axs[2].legend()
@@ -155,22 +636,22 @@ def plot_results(q_full,fuerzas,tau):
     # Subplot 1: X
     fig.suptitle('Evolución temporal de la posición del codo izquierdo',y=1)
 
-    axs[0].plot(x_deseado_lelbow, label='x deseado', linestyle='--')
-    axs[0].plot(x_obtenido_lelbow, label='x obtenido')
+    axs[0].plot(x_deseado_lelbow, label='x objetivo', linestyle='--')
+    axs[0].plot(x_obtenido_lelbow, label='x optimizado')
     axs[0].set_ylabel('x (m)')
     axs[0].legend()
     axs[0].grid(True)
 
     # Subplot 2: Y
-    axs[1].plot(y_deseado_lelbow, label='y deseado', linestyle='--')
-    axs[1].plot(y_obtenido_lelbow, label='y obtenido')
+    axs[1].plot(y_deseado_lelbow, label='y objetivo', linestyle='--')
+    axs[1].plot(y_obtenido_lelbow, label='y optimizado')
     axs[1].set_ylabel('y (m)')
     axs[1].legend()
     axs[1].grid(True)
 
     # Subplot 3: Z
-    axs[2].plot(z_deseado_lelbow, label='z deseado', linestyle='--')
-    axs[2].plot(z_obtenido_lelbow, label='z obtenido')
+    axs[2].plot(z_deseado_lelbow, label='z objetivo', linestyle='--')
+    axs[2].plot(z_obtenido_lelbow, label='z optimizado')
     axs[2].set_ylabel('z (m)')
     axs[2].set_xlabel('Tiempo (s)')
     axs[2].legend()
@@ -189,11 +670,11 @@ def plot_results(q_full,fuerzas,tau):
     error_norm_lelbow = np.linalg.norm(errors_lelbow, axis=1)
 
     plt.figure(figsize=(10, 4))
-    plt.plot(error_norm_lhand, label='Norma del error de la mano izquierda')
-    plt.plot(error_norm_lelbow, label='Norma del error del codo izquierdo')
+    plt.plot(error_norm_lhand, label='Norma de la diferencia de la mano izquierda')
+    plt.plot(error_norm_lelbow, label='Norma de la diferencia del codo izquierdo')
     plt.xlabel('Tiempo (s)')
-    plt.ylabel('Error euclideano (m)')
-    plt.title('Norma del error cartesiano de la mano y codo izquierdo')
+    plt.ylabel('Diferencia (m)')
+    plt.title('Norma de la diferencia entre objetivo y optimización de la mano y codo izquierdo')
     plt.grid(True)
     plt.xlim(0, time_steps[-1])
     plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
@@ -233,7 +714,7 @@ def plot_results(q_full,fuerzas,tau):
     x_obtenido_rhand = p_actual_rhand[:, 0]
     y_obtenido_rhand = p_actual_rhand[:, 1]
     z_obtenido_rhand = p_actual_rhand[:, 2]
-
+    
     # Crear subplots
     
     fig, axs = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
@@ -241,22 +722,22 @@ def plot_results(q_full,fuerzas,tau):
     # Subplot 1: X
     fig.suptitle('Evolución temporal de la posición de la mano derecha',y=1)
 
-    axs[0].plot(x_deseado_rhand, label='x deseado', linestyle='--')
-    axs[0].plot(x_obtenido_rhand, label='x obtenido')
+    axs[0].plot(x_deseado_rhand, label='x objetivo', linestyle='--')
+    axs[0].plot(x_obtenido_rhand, label='x optimizado')
     axs[0].set_ylabel('x (m)')
     axs[0].legend()
     axs[0].grid(True)
 
     # Subplot 2: Y
-    axs[1].plot(y_deseado_rhand, label='y deseado', linestyle='--')
-    axs[1].plot(y_obtenido_rhand, label='y obtenido')
+    axs[1].plot(y_deseado_rhand, label='y objetivo', linestyle='--')
+    axs[1].plot(y_obtenido_rhand, label='y optimizado')
     axs[1].set_ylabel('y (m)')
     axs[1].legend()
     axs[1].grid(True)
 
     # Subplot 3: Z
-    axs[2].plot(z_deseado_rhand, label='z deseado', linestyle='--')
-    axs[2].plot(z_obtenido_rhand, label='z obtenido')
+    axs[2].plot(z_deseado_rhand, label='z objetivo', linestyle='--')
+    axs[2].plot(z_obtenido_rhand, label='z optimizado')
     axs[2].set_ylabel('z (m)')
     axs[2].set_xlabel('Tiempo (s)')
     axs[2].legend()
@@ -285,22 +766,22 @@ def plot_results(q_full,fuerzas,tau):
     # Subplot 1: X
     fig.suptitle('Evolución temporal de la posición del codo derecho',y=1)
 
-    axs[0].plot(x_deseado_relbow, label='x deseado', linestyle='--')
-    axs[0].plot(x_obtenido_relbow, label='x obtenido')
+    axs[0].plot(x_deseado_relbow, label='x objetivo', linestyle='--')
+    axs[0].plot(x_obtenido_relbow, label='x optimizado')
     axs[0].set_ylabel('x (m)')
     axs[0].legend()
     axs[0].grid(True)
 
     # Subplot 2: Y
-    axs[1].plot(y_deseado_relbow, label='y deseado', linestyle='--')
-    axs[1].plot(y_obtenido_relbow, label='y obtenido')
+    axs[1].plot(y_deseado_relbow, label='y objetivo', linestyle='--')
+    axs[1].plot(y_obtenido_relbow, label='y optimizado')
     axs[1].set_ylabel('y (m)')
     axs[1].legend()
     axs[1].grid(True)
 
     # Subplot 3: Z
-    axs[2].plot(z_deseado_relbow, label='z deseado', linestyle='--')
-    axs[2].plot(z_obtenido_relbow, label='z obtenido')
+    axs[2].plot(z_deseado_relbow, label='z objetivo', linestyle='--')
+    axs[2].plot(z_obtenido_relbow, label='z optimizado')
     axs[2].set_ylabel('z (m)')
     axs[2].set_xlabel('Tiempo (s)')
     axs[2].legend()
@@ -319,11 +800,11 @@ def plot_results(q_full,fuerzas,tau):
     error_norm_relbow = np.linalg.norm(errors_relbow, axis=1)
 
     plt.figure(figsize=(10, 4))
-    plt.plot(error_norm_rhand, label='Norma del error de la mano derecha')
-    plt.plot(error_norm_relbow, label='Norma del error del codo derecho')
+    plt.plot(error_norm_rhand, label='Norma de la diferencia de la mano derecha')
+    plt.plot(error_norm_relbow, label='Norma de la diferencia del codo derecho')
     plt.xlabel('Tiempo (s)')
-    plt.ylabel('Error euclideano (m)')
-    plt.title('Norma del error cartesiano de la mano y codo derecho')
+    plt.ylabel('Diferencia (m)')
+    plt.title('Norma de la diferencia entre objetivo y optimización de la mano y codo derecho')
     plt.grid(True)
     plt.xlim(0, time_steps[-1])
     plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
@@ -362,6 +843,477 @@ def plot_results(q_full,fuerzas,tau):
     plt.show()
 
     #-----------------------------------------------------------------------------------------
+
+
+def plot_results_legs(q_full):
+    jnames = [
+        "HeadYaw", "HeadPitch",
+        "LHipYawPitch", "LHipRoll", "LHipPitch", "LKneePitch", "LAnklePitch", "LAnkleRoll",
+        "RHipYawPitch", "RHipRoll", "RHipPitch", "RKneePitch", "RAnklePitch", "RAnkleRoll",
+        "LShoulderPitch", "LShoulderRoll", "LElbowYaw", "LElbowRoll", "LWristYaw", "LHand",
+        "RShoulderPitch", "RShoulderRoll", "RElbowYaw", "RElbowRoll", "RWristYaw", "RHand",
+        "RFinger23", "RFinger13", "RFinger12",
+        "LFinger21", "LFinger13", "LFinger11",
+        "RFinger22", "LFinger22", "RFinger21",
+        "LFinger12", "RFinger11", "LFinger23",
+        "LThumb1", "RThumb1", "RThumb2", "LThumb2"
+    ]
+
+    rcParams.update({
+        "font.family": "serif",
+        "font.size": 12,
+        "axes.titlesize": 14,
+        "axes.labelsize": 12,
+        "legend.fontsize": 10,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "lines.linewidth": 1.25,
+        "figure.dpi": 100
+    })
+
+    time_steps = np.arange(q_full.shape[1])
+
+    #------------------- Regiones de seguimiento
+    tracking_segments = []
+    in_segment = False
+
+    for i in range(len(left_contact)):
+        if left_contact[i] == 0 and not in_segment:
+            start = i
+            in_segment = True
+        elif left_contact[i] == 1 and in_segment:
+            end = i
+            tracking_segments.append((start, end))
+            in_segment = False
+
+    # Si termina en seguimiento
+    if in_segment:
+        tracking_segments.append((start, len(left_contact)-1))
+
+    #-----------------------------------------------------------------------------------------
+    # Guardamos el error cartesiano para cada tiempo
+    errors_lfoot = np.zeros((N, 3))  # x, y, z
+    errors_lknee= np.zeros((N, 3))  # x, y, z
+
+    p_actual_lfoot = np.zeros((N,3))
+    p_actual_lknee = np.zeros((N,3))
+
+    p_deseada_lfoot = np.zeros((N,3))
+    p_deseada_lknee = np.zeros((N,3))
+
+
+    for i in range(N):
+        p_actual_lfoot[i] = fkine_left_foot_constant(q[8:14, i])[0:3,3]
+        p_actual_lknee[i] = fkine_left_knee(q[8:14, i])[0:3,3]
+        # Posición deseada en ese instante
+        p_deseada_lfoot[i] = left_foot_points[i]  # (x, y, z)
+        p_deseada_lknee[i] = left_knee_points[i]  # (x, y, z)
+        # Error cartesiano
+        errors_lfoot[i] = p_actual_lfoot[i] - p_deseada_lfoot[i]
+        errors_lknee[i] = p_actual_lknee[i] - p_deseada_lknee[i]
+
+
+    #--------------------------------------------------------------------------------------------------------------------------------------
+    # Extraer componentes
+    x_deseado_lfoot = p_deseada_lfoot[:, 0]
+    y_deseado_lfoot = p_deseada_lfoot[:, 1]
+    z_deseado_lfoot = p_deseada_lfoot[:, 2]
+
+    x_obtenido_lfoot = p_actual_lfoot[:, 0]
+    y_obtenido_lfoot = p_actual_lfoot[:, 1]
+    z_obtenido_lfoot = p_actual_lfoot[:, 2]
+
+    # Crear subplots
+    
+    fig, axs = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
+
+    # Subplot 1: X
+    fig.suptitle('Evolución temporal de la posición del pie izquierdo',y=1)
+
+    axs[0].plot(x_deseado_lfoot, label='x objetivo', linestyle='--')
+    axs[0].plot(x_obtenido_lfoot, label='x optimizado')
+    axs[0].set_ylabel('x (m)')
+    axs[0].legend()
+    axs[0].grid(True)
+
+    # Subplot 2: Y
+    axs[1].plot(y_deseado_lfoot, label='y objetivo', linestyle='--')
+    axs[1].plot(y_obtenido_lfoot, label='y optimizado')
+    axs[1].set_ylabel('y (m)')
+    axs[1].legend()
+    axs[1].grid(True)
+
+    # Subplot 3: Z
+    axs[2].plot(z_deseado_lfoot, label='z objetivo', linestyle='--')
+    axs[2].plot(z_obtenido_lfoot, label='z optimizado')
+    axs[2].set_ylabel('z (m)')
+    axs[2].set_xlabel('Tiempo (s)')
+    axs[2].legend()
+    axs[2].grid(True)
+
+
+    for ax in axs:
+        for seg in tracking_segments:
+            ax.axvspan(time_steps[seg[0]], time_steps[seg[1]], 
+                    color='yellow', alpha=0.3, label='Seguimiento activo')
+            
+    for ax in axs:
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax.legend(by_label.values(), by_label.keys())
+
+    # Evitar etiquetas duplicadas en leyenda
+    handles, labels = axs[0].get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    axs[0].legend(by_label.values(), by_label.keys())
+
+
+    plt.xlim(0, time_steps[-1])
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
+    plt.tight_layout()
+    plt.show()
+
+    #-------------------------------------------------------------------------------------------------------------------------------------
+    # Extraer componentes
+    x_deseado_lknee = p_deseada_lknee[:, 0]
+    y_deseado_lknee = p_deseada_lknee[:, 1]
+    z_deseado_lknee = p_deseada_lknee[:, 2]
+
+    x_obtenido_lknee = p_actual_lknee[:, 0]
+    y_obtenido_lknee = p_actual_lknee[:, 1]
+    z_obtenido_lknee = p_actual_lknee[:, 2]
+
+    # Crear subplots
+    fig, axs = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
+
+    # Subplot 1: X
+    fig.suptitle('Evolución temporal de la posición de la rodilla izquierda',y=1)
+
+    axs[0].plot(x_deseado_lknee, label='x objetivo', linestyle='--')
+    axs[0].plot(x_obtenido_lknee, label='x optimizado')
+    axs[0].set_ylabel('x (m)')
+    axs[0].legend()
+    axs[0].grid(True)
+
+    # Subplot 2: Y
+    axs[1].plot(y_deseado_lknee, label='y objetivo', linestyle='--')
+    axs[1].plot(y_obtenido_lknee, label='y optimizado')
+    axs[1].set_ylabel('y (m)')
+    axs[1].legend()
+    axs[1].grid(True)
+
+    # Subplot 3: Z
+    axs[2].plot(z_deseado_lknee, label='z objetivo', linestyle='--')
+    axs[2].plot(z_obtenido_lknee, label='z optimizado')
+    axs[2].set_ylabel('z (m)')
+    axs[2].set_xlabel('Tiempo (s)')
+    axs[2].legend()
+    axs[2].grid(True)
+
+    for ax in axs:
+        for seg in tracking_segments:
+            ax.axvspan(time_steps[seg[0]], time_steps[seg[1]], 
+                    color='yellow', alpha=0.3, label='Seguimiento activo')
+            
+    for ax in axs:
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax.legend(by_label.values(), by_label.keys())
+
+    # Evitar etiquetas duplicadas en leyenda
+    handles, labels = axs[0].get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    axs[0].legend(by_label.values(), by_label.keys())
+
+    plt.xlim(0, time_steps[-1])
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
+    plt.tight_layout()
+    plt.show()
+
+
+    #--------------------------------------------------------------------------------------------------------------------------------------
+    # Opción 2: Norma del error
+    error_norm_lfoot = np.linalg.norm(errors_lfoot, axis=1)
+    error_norm_lknee = np.linalg.norm(errors_lknee, axis=1)
+
+    plt.figure(figsize=(10, 4))
+    plt.plot(error_norm_lfoot, label='Norma de la diferencia del pie izquierdo')
+    plt.plot(error_norm_lknee, label='Norma de la diferencia de la rodilla izquierda')
+    plt.xlabel('Tiempo (s)')
+    plt.ylabel('Diferencia (m)')
+    plt.title('Norma de la diferencia entre objetivo y optimización del pie y rodilla izquierda')
+    plt.grid(True)
+
+    ax = plt.gca()
+
+
+    # Sombrear los fragmentos
+    for seg in tracking_segments:
+        ax.axvspan(time_steps[seg[0]], time_steps[seg[1]], 
+                color='yellow', alpha=0.3, label='Seguimiento activo')
+
+
+    plt.xlim(0, time_steps[-1])
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+ #-----------------------------------------------------------------------------------------
+
+    # Regiones de seguimiento
+     #------------------- Regiones de seguimiento
+    tracking_segments = []
+    in_segment = False
+
+    for i in range(len(right_contact)):
+        if right_contact[i] == 0 and not in_segment:
+            start = i
+            in_segment = True
+        elif right_contact[i] == 1 and in_segment:
+            end = i
+            tracking_segments.append((start, end))
+            in_segment = False
+
+    # Si termina en seguimiento
+    if in_segment:
+        tracking_segments.append((start, len(left_contact)-1))
+
+    # -------------------------------------------------------------
+
+     # Guardamos el error cartesiano para cada tiempo
+    errors_rfoot = np.zeros((N, 3))  # x, y, z
+    errors_rknee= np.zeros((N, 3))  # x, y, z
+
+    p_actual_rfoot= np.zeros((N,3))
+    p_actual_rknee = np.zeros((N,3))
+
+    p_deseada_rfoot = np.zeros((N,3))
+    p_deseada_rknee = np.zeros((N,3))
+
+    for i in range(N):
+        p_actual_rfoot[i]  = fkine_right_foot_constant(q[14:20, i])[0:3,3]
+        p_actual_rknee[i] = fkine_right_knee(q[14:20, i])[0:3,3]
+        # Posición deseada en ese instante
+        p_deseada_rfoot[i]  = right_foot_points[i]  # (x, y, z)
+        p_deseada_rknee[i] = right_knee_points[i]  # (x, y, z)
+        # Error cartesiano
+        errors_rfoot[i] = p_actual_rfoot[i]  - p_deseada_rfoot[i] 
+        errors_rknee[i] = p_actual_rknee[i]  - p_deseada_rknee[i] 
+
+
+   #--------------------------------------------------------------------------------------------------------------------------------------
+    # Extraer componentes
+    x_deseado_rfoot = p_deseada_rfoot[:, 0]
+    y_deseado_rfoot = p_deseada_rfoot[:, 1]
+    z_deseado_rfoot = p_deseada_rfoot[:, 2]
+
+    x_obtenido_rfoot = p_actual_rfoot[:, 0]
+    y_obtenido_rfoot = p_actual_rfoot[:, 1]
+    z_obtenido_rfoot = p_actual_rfoot[:, 2]
+
+    # Crear subplots
+    
+    fig, axs = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
+
+    # Subplot 1: X
+    fig.suptitle('Evolución temporal de la posición del pie derecho',y=1)
+
+    axs[0].plot(x_deseado_rfoot, label='x objetivo', linestyle='--')
+    axs[0].plot(x_obtenido_rfoot, label='x optimizado')
+    axs[0].set_ylabel('x (m)')
+    axs[0].legend()
+    axs[0].grid(True)
+
+    # Subplot 2: Y
+    axs[1].plot(y_deseado_rfoot, label='y objetivo', linestyle='--')
+    axs[1].plot(y_obtenido_rfoot, label='y optimizado')
+    axs[1].set_ylabel('y (m)')
+    axs[1].legend()
+    axs[1].grid(True)
+
+    # Subplot 3: Z
+    axs[2].plot(z_deseado_rfoot, label='z objetivo', linestyle='--')
+    axs[2].plot(z_obtenido_rfoot, label='z optimizado')
+    axs[2].set_ylabel('z (m)')
+    axs[2].set_xlabel('Tiempo (s)')
+    axs[2].legend()
+    axs[2].grid(True)
+
+
+    for ax in axs:
+        for seg in tracking_segments:
+            ax.axvspan(time_steps[seg[0]], time_steps[seg[1]], 
+                    color='yellow', alpha=0.3, label='Seguimiento activo')
+            
+    for ax in axs:
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax.legend(by_label.values(), by_label.keys())
+
+    # Evitar etiquetas duplicadas en leyenda
+    handles, labels = axs[0].get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    axs[0].legend(by_label.values(), by_label.keys())
+
+
+
+    plt.xlim(0, time_steps[-1])
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
+    plt.tight_layout()
+    plt.show()
+
+    #----------------------------------------------------------------------------------------
+
+    x_deseado_rknee= p_deseada_rknee[:, 0]
+    y_deseado_rknee = p_deseada_rknee[:, 1]
+    z_deseado_rknee= p_deseada_rknee[:, 2]
+
+    x_obtenido_rknee = p_actual_rknee[:, 0]
+    y_obtenido_rknee = p_actual_rknee[:, 1]
+    z_obtenido_rknee= p_actual_rknee[:, 2]
+
+
+    # Crear subplots
+    
+    fig, axs = plt.subplots(3, 1, figsize=(10, 9), sharex=True)
+
+    # Subplot 1: X
+    fig.suptitle('Evolución temporal de la posición de la rodilla derecha',y=1)
+
+    axs[0].plot(x_deseado_rknee, label='x objetivo', linestyle='--')
+    axs[0].plot(x_obtenido_rknee, label='x optimizado')
+    axs[0].set_ylabel('x (m)')
+    axs[0].legend()
+    axs[0].grid(True)
+
+    # Subplot 2: Y
+    axs[1].plot(y_deseado_rknee, label='y objetivo', linestyle='--')
+    axs[1].plot(y_obtenido_rknee, label='y optimizado')
+    axs[1].set_ylabel('y (m)')
+    axs[1].legend()
+    axs[1].grid(True)
+
+    # Subplot 3: Z
+    axs[2].plot(z_deseado_rknee, label='z objetivo', linestyle='--')
+    axs[2].plot(z_obtenido_rknee, label='z optimizado')
+    axs[2].set_ylabel('z (m)')
+    axs[2].set_xlabel('Tiempo (s)')
+    axs[2].legend()
+    axs[2].grid(True)
+
+    for ax in axs:
+        for seg in tracking_segments:
+            ax.axvspan(time_steps[seg[0]], time_steps[seg[1]], 
+                    color='yellow', alpha=0.3, label='Seguimiento activo')
+            
+    
+    for ax in axs:
+        handles, labels = ax.get_legend_handles_labels()
+        by_label = dict(zip(labels, handles))
+        ax.legend(by_label.values(), by_label.keys())
+
+    # Evitar etiquetas duplicadas en leyenda
+    handles, labels = axs[0].get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    axs[0].legend(by_label.values(), by_label.keys())
+
+    plt.xlim(0, time_steps[-1])
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
+    plt.tight_layout()
+    plt.show()
+
+
+    #----------------------------------------------------------------------------------------
+    # Opción 2: Norma del error
+    error_norm_rfoot = np.linalg.norm(errors_rfoot, axis=1)
+    error_norm_rknee = np.linalg.norm(errors_rknee, axis=1)
+
+    plt.figure(figsize=(10, 4))
+    plt.plot(error_norm_rfoot, label='Norma de la diferencia del pie derecho')
+    plt.plot(error_norm_rknee, label='Norma de la diferencia de la rodilla derecha')
+    plt.xlabel('Tiempo (s)')
+    plt.ylabel('Diferencia (m)')
+    plt.title('Norma de la diferencia entre objetivo y optimización de la rodilla y pie derecho')
+    plt.grid(True)
+
+    ax = plt.gca()
+
+
+    # Sombrear los fragmentos
+    for seg in tracking_segments:
+        ax.axvspan(time_steps[seg[0]], time_steps[seg[1]], 
+                color='yellow', alpha=0.3, label='Seguimiento activo')
+
+
+    plt.xlim(0, time_steps[-1])
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    #-----------------------------------------------------------------------------------------
+
+    plt.figure(figsize=(10, 4))
+    for i in range(6):
+        plt.plot(q_full[8+ i, :], label=jnames[2 + i])
+    plt.title("Evolución de las articulaciones de la pierna izquierda")
+    plt.xlabel("Tiempo (s)")
+    plt.ylabel("Ángulo articular (rad)")
+    plt.grid(True)
+    plt.xlim(0, time_steps[-1])
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    #-----------------------------------------------------------------------------------------
+
+    plt.figure(figsize=(10, 4))
+    for i in range(6):
+        plt.plot(q_full[14+ i, :], label=jnames[8 + i])
+    plt.title("Evolución de las articulaciones de la pierna derecha")
+    plt.xlabel("Tiempo (s)")
+    plt.ylabel("Ángulo articular (rad)")
+    plt.grid(True)
+    plt.xlim(0, time_steps[-1])
+    plt.gca().xaxis.set_major_formatter(FuncFormatter(lambda x, pos: f'{x * 0.05:.2f}'))
+
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+    #-----------------------------------------------------------------------------------------
+
+def plot_forces(fuerzas,tau):
+    jnames = [
+        "HeadYaw", "HeadPitch",
+        "LHipYawPitch", "LHipRoll", "LHipPitch", "LKneePitch", "LAnklePitch", "LAnkleRoll",
+        "RHipYawPitch", "RHipRoll", "RHipPitch", "RKneePitch", "RAnklePitch", "RAnkleRoll",
+        "LShoulderPitch", "LShoulderRoll", "LElbowYaw", "LElbowRoll", "LWristYaw", "LHand",
+        "RShoulderPitch", "RShoulderRoll", "RElbowYaw", "RElbowRoll", "RWristYaw", "RHand",
+        "RFinger23", "RFinger13", "RFinger12",
+        "LFinger21", "LFinger13", "LFinger11",
+        "RFinger22", "LFinger22", "RFinger21",
+        "LFinger12", "RFinger11", "LFinger23",
+        "LThumb1", "RThumb1", "RThumb2", "LThumb2"
+    ]
+
+    rcParams.update({
+        "font.family": "serif",
+        "font.size": 12,
+        "axes.titlesize": 14,
+        "axes.labelsize": 12,
+        "legend.fontsize": 10,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "lines.linewidth": 1.25,
+        "figure.dpi": 100
+    })
+
+    time_steps = np.arange(q_full.shape[1])
+
+    #---------------------------------------------------------------------------------------
+
     plt.figure(figsize=(12, 5))
     for i in range(26):
         plt.plot(tau[i, :], label=jnames[i])
@@ -494,31 +1446,6 @@ def publish_tf_from_matrix(br, T, frame_id="world", child_frame_id="left_foot"):
 
     br.sendTransform(t)
 
-import pinocchio as pin
-from os.path import join
-# Cargar modelo de NAO con base flotante
-
-model_path = "/home/invitado8/proy_ws/src/nao/nao_utec/urdf/"
-urdf_filename = "naoV5blue.urdf"
-urdf_model_path = join(model_path, urdf_filename)
-model = pin.buildModelFromUrdf(urdf_model_path, pin.JointModelFreeFlyer())
-
-
-def center_of_mass_numpy(q_rpy):
-    xyz = q_rpy[0:3]
-    rpy = q_rpy[3:6]
-    q_act = q_rpy[6:]
-
-    quat_xyzw = R.from_euler('zyx', [rpy[2],rpy[1],rpy[0]]).as_quat()
-    quat = np.array([quat_xyzw[0], quat_xyzw[1], quat_xyzw[2], quat_xyzw[3]])
-
-    q_pin = np.concatenate([xyz, quat, q_act])
-
-    data = model.createData()
-    com =pin.centerOfMass(model, data, q_pin, False)
-    #com = data.com[0]  
-
-    return com
 
 def send_joint_states(q_full, rate_hz= 20):
     q_full = np.array(q_full)
@@ -547,21 +1474,23 @@ def send_joint_states(q_full, rate_hz= 20):
     for i in range(N):
 
         #print("COM:",center_of_mass_numpy(q_full[:,i])," PIE IZQ:", fkine_left_foot_constant(q_full[joint_indices["l_leg"],i],q_full[0:6,i],'c')[0:3,3] )
+        #q_full[:,i] = [0,0,0,pi/6,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+        #jaja así es
 
         com = center_of_mass_numpy(q_full[:,i])
 
-        bmarker_com.xyz([com[0],com[1],0] )
+        bmarker_com.xyz([com[0],com[1],0])
         
-        print(com[2])
+        #print(com[2])
 
-        pos = q_full[0:3, i]       # x, y, z
+        pos = q_full[0:3, i]      # x, y, z
         rpy = q_full[3:6, i]       # roll, pitch, yaw
         
 
         # Publica TF desde world → torso
         publish_tf(br, pos, rpy)
 
-        publish_tf_from_matrix(br, fkine_left_foot_constant(q_full[joint_indices["l_leg"],i],q_full[0:6,i],'c'))
+        #publish_tf_from_matrix(br, fkine_left_foot_constant(q_full[joint_indices["l_leg"],i],q_full[0:6,i],'c'))
 
         jstate = JointState()
         jstate.header.stamp = rospy.Time.now()
@@ -584,41 +1513,15 @@ def send_joint_states(q_full, rate_hz= 20):
         rate.sleep()
 
 
-def nao_trajectory(q_full):
-    robot_ip = "192.168.10.157"  # Replace with your robot's IP
-    robot_port = 9559
-
-    # Create an application instance
-    app = qi.Application(["NAOqiApp", f"--qi-url=tcp://{robot_ip}:{robot_port}"])
-    app.start()  # Start the application
-    session = app.session  # Get the session from the application
-    try:
-        print("Connected to the robot!")
-    except Exception as e:
-        print(f"Failed to connect to robot: {e}")
-    
-    finally:
-        
-        # Enviar primer frame (omitimos las 6 filas de la base flotante)
-        q0 = np.array(q_full[6:, 0].flatten())
-        joints_all(session, q0.tolist())
-
-        # Esperar 3 segundos
-        time.sleep(3)
-
-        # Enviar el resto de la trayectoria
-        for i in range(1, N):
-            qi_frame = np.array(q_full[6:, i].flatten())
-            joints_all(session, qi_frame.tolist())
-
-        app.stop()
-
-
-
-
 if __name__ == '__main__': 
 
     q_full = np.array(q)
     #plt.figure(figsize=(10, 6))
     send_joint_states(q_full)
-    #plot_results(q_full,fuerzas_resultado,tau_resultado)
+    
+    # plot_results_arms(q_full)
+    # plot_results_legs(q_full)
+    # plot_forces(fuerzas_resultado,tau_resultado)
+    #plot_Com_opt_animated(q_full)
+    #plot_Com_real()
+    

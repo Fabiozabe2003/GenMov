@@ -1,58 +1,92 @@
 import qi
 import time
 import numpy as np
-import pinocchio as pin
-from scipy.spatial.transform import Rotation as R
-from os.path import join
-from forward_kinematics import *
+from math import atan2, sqrt
 from read_data import *
-# Cargar modelo de NAO con base flotante
+import threading
 
-model_path = "/home/invitado8/proy_ws/src/nao/nao_utec/urdf/"
-urdf_filename = "naoV5blue.urdf"
-urdf_model_path = join(model_path, urdf_filename)
-model = pin.buildModelFromUrdf(urdf_model_path, pin.JointModelFreeFlyer())
 reconstructed_data, left_contact, right_contact =reconstruct("Step2.csv")
+
+joint_names = [
+        "HeadYaw", "HeadPitch",
+        "LHipYawPitch", "LHipRoll", "LHipPitch", "LKneePitch", "LAnklePitch", "LAnkleRoll",
+        "RHipYawPitch", "RHipRoll", "RHipPitch", "RKneePitch", "RAnklePitch", "RAnkleRoll",
+        "LShoulderPitch", "LShoulderRoll", "LElbowYaw", "LElbowRoll", "LWristYaw", "LHand",
+        "RShoulderPitch", "RShoulderRoll", "RElbowYaw", "RElbowRoll", "RWristYaw", "RHand"
+    ]
+
+class Filter:
+    def __init__(self, alpha=1.0, initval=None):
+        self.val = initval
+        self.alpha = alpha
+        self.ralpha = 1.0 - alpha
+
+    def set(self, val):
+        if self.val is None:
+            self.val = val
+        else:
+            self.val = self.alpha * val + self.ralpha * self.val
+        return self.val
+
+    def reset(self, val):
+        self.val = val
+
+    def get(self):
+        return self.val
 
 
 class PID:
-    def __init__(self, Kp, Ki, Kd):
+    def __init__(self, Kp, Ti, Td, alpha=0.3, u_limit=0.3, d_limit=5.0):
         self.Kp = Kp
-        self.Ki = Ki
-        self.Kd = Kd
-        self.e_sum = 0
-        self.e_last = 0
+        self.Ki = Kp / Ti if Ti != 0 else 0.0
+        self.Kd = Kp * Td
+        self.e_sum = 0.0
+        self.e_last = None
+        self.u_limit = u_limit
+        self.d_limit = d_limit
+        self.filter = Filter(alpha)
+
+    def reset(self):
+        self.e_sum = 0.0
+        self.e_last = None
+        self.filter.reset(0.0)
 
     def compute(self, e, dt):
-        de = (e - self.e_last) / dt
-        self.e_sum += e * dt
-        self.e_last = e
-        return self.Kp * e + self.Ki * self.e_sum + self.Kd * de
+        e_filtered = self.filter.set(e)
+
+        if self.e_last is None:
+            self.e_last = e_filtered
+
+        de = (e_filtered - self.e_last) / dt
+        de = max(min(de, self.d_limit), -self.d_limit)
+
+        self.e_sum += e_filtered * dt
+        self.e_last = e_filtered
+
+        u = self.Kp * e_filtered + self.Ki * self.e_sum + self.Kd * de
+        u = max(min(u, self.u_limit), -self.u_limit)
+        return u
     
-def center_of_mass_numpy(q_rpy):
-    xyz = q_rpy[0:3]
-    rpy = q_rpy[3:6]
-    q_act = q_rpy[6:]
+def compute_pitch_roll_error(com, ankle, support_center):
+    v = com - ankle
+    theta_com_pitch = atan2(v[2], v[0])
+    theta_sup_pitch = atan2(sqrt(v[2]**2 + v[0]**2), support_center[0] - ankle[0])
+    pitch_error = theta_sup_pitch - theta_com_pitch
 
-    quat_xyzw  = R.from_euler('zyx', [rpy[2],rpy[1],rpy[0]]).as_quat()
-    quat = np.array([quat_xyzw[0], quat_xyzw[1], quat_xyzw[2], quat_xyzw[3]])
-    q_pin = np.concatenate([xyz, quat, q_act])
+    theta_com_roll = atan2(v[2], v[1])
+    theta_sup_roll = atan2(sqrt(v[2]**2 + v[1]**2), support_center[1] - ankle[1])
+    roll_error = theta_com_roll - theta_sup_roll
+    return pitch_error, roll_error
 
-    data = model.createData()
-    com = model.computeCenterOfMass(data, q_pin)
-    return com
-
-
-pid_pitch = PID(Kp=0.816, Ki=1.632, Kd=0.102)
-pid_roll  = PID(Kp=0.888, Ki=2.537, Kd=0.777)
+pid_pitch = PID(Kp=0.816, Ti=0.5, Td=0.125)
+pid_roll  = PID(Kp=0.888, Ti=0.35, Td=0.875)
+                
+                
 dt_frame = 0.05      # frecuencia de trayectoria (20 Hz)
 dt_pid   = 0.01      # frecuencia del PID (100 Hz)
 
 
-def joints_all(session, q, inicial=False):
-    import time
-    import numpy as np
-
+def joints_all(session, q, i, inicial=False):
     motion = session.service("ALMotion")
     memory = session.service("ALMemory")
 
@@ -72,35 +106,42 @@ def joints_all(session, q, inicial=False):
 
     if inicial:
         motion.angleInterpolationWithSpeed(joint_names, q, 0.25)
+        print(len(q))
     else:
-        dt_pid = 0.01  # 100 Hz
+        dt_pid = 0.01 # 100 Hz
 
         while (time.perf_counter() - start_time) < 0.0485:
             q_pid = q.copy()
-
             # Solo si hay un pie en contacto
-            angle_x = memory.getData("Device/SubDeviceList/InertialSensor/AngleX/Sensor/Value")
-            angle_y = memory.getData("Device/SubDeviceList/InertialSensor/AngleY/Sensor/Value")
-            angle_z = memory.getData("Device/SubDeviceList/InertialSensor/AngleZ/Sensor/Value")
-            q_base = [0.0, 0.0, 0.0, angle_x, angle_y, -angle_z]
-            q_full = np.concatenate([q_base, q_pid])
+          
+            if left_contact[i] == 1 and right_contact[i] == 0:
+                com = motion.getCOM("Body", 2, True) 
+                ankle_l = np.array(motion.getPosition("LLeg",2,True)[0:3])
+                support_l = ankle_l + np.array([0.015, 0.01, 0])
 
-            if left_contact == 1 and right_contact == 0:
-                com = center_of_mass_numpy(q_full)[:2]
-                foot = fkine_left_foot_constant(q_pid[2:8], q_base, "c")[0:2,3]
-                error = com - foot
-                q_pid[6] += -pid_pitch.compute(error[0], dt_pid)  # LAnklePitch
-                q_pid[7] += -pid_roll.compute(error[1], dt_pid)   # LAnkleRoll
+                pitch_error, roll_error = compute_pitch_roll_error(com, ankle_l, support_l)
+                # print("roll_error",roll_error)
+                # print("AnklROll antes:", q_pid[7])
 
-            elif right_contact == 1 and left_contact == 0:
-                com = center_of_mass_numpy(q_full)[:2]
-                foot = fkine_right_foot_constant(q_pid[8:14], q_base, "c")[0:2,3]
-                error = com - foot
-                q_pid[12] += -pid_pitch.compute(error[0], dt_pid)  # RAnklePitch
-                q_pid[13] += -pid_roll.compute(error[1], dt_pid)   # RAnkleRoll
+                q_pid[6] += pitch_error#pid_pitch.compute(pitch_error, dt_pid)  # LAnklePitch
+                q_pid[7] += roll_error#pid_roll.compute(roll_error, dt_pid)  # LAnkleRoll
 
-            motion.angleInterpolationWithSpeed(joint_names, q_pid, 0.75)
-            time.sleep(dt_pid)
+                
+                # print("AnklROll:", q_pid[7])
+
+            elif right_contact[i] == 1 and left_contact[i] == 0:
+                com = motion.getCOM("Body", 2, True) 
+                ankle_r= np.array(motion.getPosition("RLeg",2,True)[0:3])
+                support_r = ankle_r + np.array([0.015, -0.01, 0])
+
+                pitch_error, roll_error = compute_pitch_roll_error(com, ankle_r, support_r)
+            
+                q_pid[12] += pid_pitch.compute(pitch_error, dt_pid)  # RAnklePitch
+                q_pid[13] += pid_roll.compute(roll_error, dt_pid)   # RAnkleRoll
+
+            q_pid = [float(x) for x in q_pid]
+            motion.setAngles(joint_names, q_pid, 0.7)
+            #time.sleep(dt_pid)        
 
 
 
@@ -109,7 +150,7 @@ def main():
     q_full = data["q_full"]
     q_full = np.array(q_full)
 
-    robot_ip = "192.168.10.101"
+    robot_ip = "169.254.38.159"
     robot_port = 9559
 
     # Create an application instance
@@ -146,7 +187,7 @@ def main():
         time.sleep(3)
         # Ahora mandamos los qs
         q0 = np.array(q_full[6:, 0].flatten())
-        joints_all(session, q0.tolist(),True)
+        joints_all(session, q0.tolist(), 1 ,True)
 
 
 
@@ -155,14 +196,14 @@ def main():
             q_start_frame = q_full[6:, i].flatten()
         
             start_time = time.time()
-            joints_all(session,q_start_frame.tolist())
+            joints_all(session,q_start_frame.tolist(),i)
             elapsed_time = time.time() - start_time
 
 
             print(f"Step {i}: {elapsed_time:.4f} seconds")
             
         
-            print(i)
+             # print(i)
 
 
     except Exception as e:

@@ -50,7 +50,6 @@ joint_indices = {
 
 Dof = 32 # 32 cuando agregue los 6 de la base lotante
 Dof_act = 26  #26 qs actuados
-N = 125
 q = SX.sym('q',Dof*N) # variable 'q' de cuerpo completo
 tau = SX.sym('tau',Dof_act*N)  # par para articulaciones actuadas
 f_contact = SX.sym('f_contact', 3*8*(N))  # fuerzas de contacto (4 por pie)
@@ -492,32 +491,3 @@ if __name__ == '__main__':
     send_joint_states(q_full)
 
 
-
-def nao_trajectory(q_full):
-    robot_ip = "192.168.10.157"  # Replace with your robot's IP
-    robot_port = 9559
-
-    # Create an application instance
-    app = qi.Application(["NAOqiApp", f"--qi-url=tcp://{robot_ip}:{robot_port}"])
-    app.start()  # Start the application
-    session = app.session  # Get the session from the application
-    try:
-        print("Connected to the robot!")
-    except Exception as e:
-        print(f"Failed to connect to robot: {e}")
-    
-    finally:
-        
-        # Enviar primer frame (omitimos las 6 filas de la base flotante)
-        q0 = np.array(q_full[6:, 0].flatten())
-        joints_all(session, q0.tolist())
-
-        # Esperar 3 segundos
-        time.sleep(3)
-
-        # Enviar el resto de la trayectoria
-        for i in range(1, N):
-            qi_frame = np.array(q_full[6:, i].flatten())
-            joints_all(session, qi_frame.tolist())
-
-        app.stop()

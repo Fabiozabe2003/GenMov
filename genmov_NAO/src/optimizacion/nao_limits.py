@@ -1,8 +1,6 @@
 import numpy as np
 import casadi as ca
-
-
-
+# import jaja así es
 # Limits
 # http://doc.aldebaran.com/2-1/family/robots/joints_robot.html
 q_min = [-ca.inf,-ca.inf, -ca.inf , -ca.inf, -ca.inf, -ca.inf,
@@ -21,14 +19,12 @@ q_max = [ ca.inf,ca.inf, ca.inf , ca.inf, ca.inf, ca.inf,
       2.08567, 0.314159, 2.08567, 1.54462, 1.82387, 1.0]
 
 
-dq_max = [8.26797, 7.19047,
-          4.16174,4.16174,6.40239,6.40239,6.40239,4.16174,
-          4.16174,4.16174,6.40239,6.40239,6.40239,4.16174,
-          8.26797,7.19407,8.26797,7.19407,24.6229, 8.33, 
-          8.26797,7.19407,8.26797,7.19407,24.6229, 8.33 #last speed is from hand (which is none)
+dq_max = [8.26797/8, 7.19047/8,
+          4.16174/8,4.16174/8,6.40239/8,6.40239/8,6.40239/8,4.16174/8,
+          4.16174/8,4.16174/8,6.40239/8,6.40239/8,6.40239/8,4.16174/8,
+          8.26797/8,7.19407/8,8.26797/8,7.19407/8,24.6229/8, 8.33/8, 
+          8.26797/8,7.19407/8,8.26797/8,7.19407/8,24.6229/8, 8.33/8 #last speed is from hand (which is none)
         ]
-
-dq_max = [x/9 for x in dq_max]
 
 dq_min=[-x for x in dq_max]
 

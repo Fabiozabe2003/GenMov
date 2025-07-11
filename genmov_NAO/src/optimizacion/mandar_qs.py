@@ -2,6 +2,7 @@ import qi
 import time
 import numpy as np
 
+
 def get_imu(session):
     memory = session.service("ALMemory")
 
@@ -108,8 +109,8 @@ def main():
     # q_full = data["q_smooth"]
     # q_full = np.array(q_full)
 
-    #robot_ip = "192.168.10.101"
-    robot_ip = "169.254.38.159"# azul (main character)
+    robot_ip = "192.168.10.103"
+    #robot_ip = "169.254.119.248"# azul (main character)
     # robot_ip = "169.254.199.108" #azul español (cinde)
     #robot_ip = "169.254.129.144" # naranja
     robot_port = 9559
@@ -145,7 +146,7 @@ def main():
 
         print("Poniendose de pie")
 
-        time.sleep(3)
+        time.sleep(2)
         # Ahora mandamos los qs
         q0 = np.array(q_full[6:, 0].flatten())
         joints_all(session, q0.tolist(),True)

@@ -3,8 +3,9 @@ from qibullet import SimulationManager
 import time
 import numpy as np
 from nao_limits import *
-
-
+import sys
+#dir="caso3"
+dir=sys.argv[1]
 q_inicial_deseado = [0.04597806930541992, 0.28067994117736816, 
                      0.065986785888671875, -0.08432793617248535, 0.25928807258605957, -0.09208202362060547,
                       0.11654210090637207, 0.07674193382263184, 0.065986785888671875, 0.06447005271911621, 
@@ -55,6 +56,7 @@ if __name__ == "__main__":
     # for name, joint in robot.joint_dict.items():
     #     if "Finger" not in name and "Thumb" not in name:
     #         try:
+                  #jaja así es
     #             max_vel = joint.getMaxVelocity()  # Intenta acceder al límite
     #         except AttributeError:
     #             # Si no tiene ese método, usamos pybullet directamente
@@ -67,17 +69,15 @@ if __name__ == "__main__":
 
 
 
-    data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/output_trajectory/pipeline_test.npz")
-    data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/warmstart_brazos.npz")
-
+    data = np.load(f"/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/output_trajectory/{dir}/q.npz")
     q = data['q_full']
 
 
     qs = q[6:32, 0]  # Tomar los últimos 26 DoF del instante i
     qs1 = q[6:32,1]
     rate = np.ones(26)
-    robot.setAngles(joint_names, qs.tolist(), 1)
-    print("PRIMER Q MANDADO, INICIANDO MOVIMIENTO")
+    robot.setAngles(joint_names, qs.tolist(), 0.5)
+    print("Iniciando movimiento")
 
     time.sleep(3)
     p.setRealTimeSimulation(1)
@@ -89,7 +89,6 @@ if __name__ == "__main__":
             # qs1 = q[6:32,i+1]
             # dqs = (qs1 - qs) / 0.05
             # rate = np.abs(dqs) / dq_max
-            #jaja así es
             rate = np.ones(26)*1
             robot.setAngles(joint_names, qs.tolist(), rate.tolist())
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import sys
 import casadi as ca
 from casadi import *
 from forward_kinematics import *
@@ -8,15 +9,9 @@ from nao_limits import *
 from read_data import *
 import time
 import numpy as np
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-import rospy
-from sensor_msgs.msg import JointState
-import tf2_ros
-import geometry_msgs.msg
 from scipy.spatial.transform import Rotation as R
 
-
+t_init=time.time()
 # Matrices dinamicas
 model_path = "/home/invitado8/proy_ws/src/nao/nao_utec/urdf/"
 #urdf_filename = "naoV40red.urdf"
@@ -30,8 +25,11 @@ dynamic_ddq = build_dynamic_ddq()
 Jacobian_contacts, Jacobian_lcontacts, Jacobian_rcontacts = build_Jacobian_contacts()
 CoM = center_of_mass_fun(model)
 
-
-reconstructed_data, left_contact, right_contact =reconstruct("Step2.csv")
+#dir=sys.argv[1]
+dir="caso3"
+print("Dir es el siguiente:",dir)
+csv="/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/motions/{}.csv".format(dir)
+reconstructed_data, left_contact, right_contact =reconstruct(csv)
 left_hand_points=reconstructed_data["lhand"]
 right_hand_points=reconstructed_data["rhand"]
 left_elbow_points=reconstructed_data["lforearm"]
@@ -140,7 +138,7 @@ for i in range(N):
         f += ca.sumsqr(ca.vertcat(*fkine_left_knee(q_i_lleg)[0:3,3])-ca.vertcat(*left_knee_points[i]))
 
         com = CoM(dynamic_q(q_i))
-        com_xy = com[0:2] # + ca.DM([0.0, 0.03])  
+        com_xy = com[0:2] #+ ca.DM([0.0, 0.03])  
     
         f +=  100*ca.sumsqr(fkine_right_foot_constant(q_i_rleg,q_i_base,"c")[0:2,3] - com_xy)
 
@@ -174,7 +172,7 @@ for i in range(N):
         f += ca.sumsqr(ca.vertcat(*fkine_right_knee(q_i_rleg)[0:3,3])-ca.vertcat(*right_knee_points[i]))
 
         com = CoM(dynamic_q(q_i))
-        com_xy = com[0:2] #+ ca.DM([0.00, -0.03]) 
+        com_xy = com[0:2] # + ca.DM([0.00, -0.03]) 
        
 
         f += 100*ca.sumsqr(fkine_left_foot_constant(q_i_lleg,q_i_base,"c")[0:2,3] - com_xy) # CENTRO DE MASA COMO COSTO
@@ -369,22 +367,6 @@ ubtau = ca.repmat(tau_max,N)
 lbf = ca.repmat([-ca.inf]*(N_contacts_left+N_contacts_right),12)
 ubf = ca.repmat([ca.inf]*(N_contacts_left+N_contacts_right),12)
 
-
-data = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/warmstart_brazos.npz")
-data2 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/tau.npz")
-data3 = np.load("/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/fuerzas.npz")
-
-
-q_warm = data['q_full']
-tau_warm = data2['tau_resultado']
-fuerzas_warm = data3['fuerzas_resultado']
-q0= q_warm.reshape(-1, order='F')  # (Dof*N, 1)
-tau0= tau_warm.reshape(-1, order='F')   
-fc0= fuerzas_warm.reshape(-1, order='F')  
-print(q0.shape)
-print(tau0.shape)
-print( fc0.shape)
-
 print(Dof*N)
 print(Dof_act*N) 
 print(12*(N_contacts_left +  N_contacts_right))
@@ -392,9 +374,6 @@ q0 = np.zeros(Dof*N)
 tau0 = np.zeros(Dof_act*N)
 fc0 = np.zeros(12*(N_contacts_left+N_contacts_right))
 x_init = ca.vertcat(ca.DM(q0), ca.DM(tau0), ca.DM(fc0))
-
-
-print("INICIANDO SOLUCION")
 
 sol = solver(x0 = x_init,
             lbx=vertcat(lbq,lbtau,lbf),
@@ -428,178 +407,19 @@ for i in range(N):
 print("Tiempo de optimización: ", end-start)
 
 
-np.savez("warmstart_brazos.npz", q_full=q_full)
-np.savez("tau.npz", tau_resultado=tau_resultado)
-np.savez("fuerzas.npz", fuerzas_resultado=fuerzas_resultado)
+np.savez(f"/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/output_trajectory/{dir}/q.npz", q_full=q_full)
+np.savez(f"/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/output_trajectory/{dir}/tau.npz", tau_resultado=tau_resultado)
+np.savez(f"/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/output_trajectory/{dir}/fuerzas.npz", fuerzas_resultado=fuerzas_resultado)
 
+# Save time
+t_fin=time.time()
+filename=f'/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/times/{dir}.txt'
+with open(filename,'r') as file:
+    lines = file.readlines()
+while len(lines) < 3:
+    lines.append("\n")
+lines[2]=f"{t_fin-t_init}\n"
 
-
-jnames = [
-        "HeadYaw", "HeadPitch",
-        "LHipYawPitch", "LHipRoll", "LHipPitch", "LKneePitch", "LAnklePitch", "LAnkleRoll",
-        "RHipYawPitch", "RHipRoll", "RHipPitch", "RKneePitch", "RAnklePitch", "RAnkleRoll",
-        "LShoulderPitch", "LShoulderRoll", "LElbowYaw", "LElbowRoll", "LWristYaw", "LHand",
-        "RShoulderPitch", "RShoulderRoll", "RElbowYaw", "RElbowRoll", "RWristYaw", "RHand",
-        "RFinger23", "RFinger13", "RFinger12",
-        "LFinger21", "LFinger13", "LFinger11",
-        "RFinger22", "LFinger22", "RFinger21",
-        "LFinger12", "RFinger11", "LFinger23",
-        "LThumb1", "RThumb1", "RThumb2", "LThumb2"
-    ]
-
-
-def publish_tf(br, position, rpy, frame_id="world", child_frame_id="base_link"):
-    t = geometry_msgs.msg.TransformStamped()
-    t.header.stamp = rospy.Time.now()
-    t.header.frame_id = frame_id
-    t.child_frame_id = child_frame_id
-    #print("POSICION DE BASE FLOTANTE AHORA:",position[0],position[1],position[2])
-    t.transform.translation.x = position[0]
-    t.transform.translation.y = position[1]
-    t.transform.translation.z = position[2]
-
-
-    quat = R.from_euler('zyx', [rpy[2],rpy[1],rpy[0]]).as_quat()
-    t.transform.rotation.x = quat[0]
-    t.transform.rotation.y =  quat[1]
-    t.transform.rotation.z = quat[2]
-    t.transform.rotation.w = quat[3]
-
-    br.sendTransform(t)
-
-def send_joint_states(q_full, rate_hz= 20):
-    q_full = np.array(q_full)
-    br = tf2_ros.TransformBroadcaster()
-
-    pub = rospy.Publisher('/joint_states', JointState, queue_size=10)
-    rospy.init_node('nao_joint_sender', anonymous=True)
-    rate = rospy.Rate(rate_hz)
-
-    for i in range(N):
-
-        pos = q_full[0:3, i]       # x, y, z
-        rpy = q_full[3:6, i]       # roll, pitch, yaw
-        
-
-        # Publica TF desde world → torso
-        publish_tf(br, pos, rpy)
-        
-        jstate = JointState()
-        jstate.header.stamp = rospy.Time.now()
-        jstate.name = jnames
-
-        q_actuated = q_full[6:32, i]  # Solo las 26 articulaciones actuables
-        q_extra = np.zeros(len(jnames) - 26)  # Dedos y pulgares en 0
-
-
-        jstate.position = np.concatenate([q_actuated, q_extra]).tolist()
-
-        pub.publish(jstate)
-        rate.sleep()
-
-
-def plot_results(q_full,fuerzas,tau):
-    for i in range(6):
-        plt.plot(q_full[20 + 6 +i,:].flatten(),  label=jnames[20 + i])
-
-    plt.title("Evolución de las articulaciones del brazo derecho")
-    plt.xlabel("Paso de tiempo")
-    plt.ylabel("Ángulo articular (rad)")
-    plt.legend()
-    #plt.ylim(-6,6)
-    #plt.xlim(0,N)
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
-
-
-    #plt.figure(figsize=(10, 6))
-    for i in range(6):
-        plt.plot(q_full[14 + 6 +i,:].flatten(), label=jnames[14 + i])
-
-    plt.title("Evolución de las articulaciones del brazo izquierdo")
-    plt.xlabel("Paso de tiempo")
-    plt.ylabel("Ángulo articular (rad)")
-    plt.legend()
-    #plt.ylim(-6,6)
-    #plt.xlim(0,N)
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
-
-
-    fig = plt.figure(figsize=(14, 8))
-    ax = fig.add_subplot(111, projection='3d')
-
-    # Dibujar cono de fricción ideal (sólo para referencia visual)
-    theta = np.linspace(0, 2 * np.pi, 50)
-    h = 8.0
-    r = mu * h
-    x_cone = r * np.outer(np.cos(theta), np.linspace(0, 1, 10))
-    y_cone = r * np.outer(np.sin(theta), np.linspace(0, 1, 10))
-    z_cone = h * np.outer(np.ones_like(theta), np.linspace(0, 1, 10))
-    ax.plot_surface(x_cone, y_cone, z_cone, alpha=0.2, color='gray')
-
-    # Colores para contactos
-    colors = plt.cm.tab10(np.linspace(0, 1, 8))
-
-    # Dibujar las fuerzas
-    for contact in range(8):
-        fx = fuerzas[3 * contact, :]
-        fy = fuerzas[3 * contact + 1, :]
-        fz = fuerzas[3 * contact + 2, :]
-        
-        # Verificación de la condición de fricción
-        inside_cone = mu ** 2 * fz ** 2 - fx ** 2 - fy ** 2 >= 0
-
-        # Fuerzas dentro del cono en verde
-        ax.quiver(
-            np.zeros_like(fx[inside_cone]),  # desplazamiento en x por contacto
-            np.zeros_like(fy[inside_cone]),
-            np.zeros_like(fz[inside_cone]),
-            fx[inside_cone], fy[inside_cone], fz[inside_cone],
-            color=colors[contact],
-            label=f'Contacto {contact+1}' if contact == 0 else None,
-            alpha=0.7
-        )
-
-        # Opcional: fuerzas fuera del cono en rojo
-        ax.quiver(
-            np.zeros_like(fx[~inside_cone]) + contact * 2,
-            np.zeros_like(fy[~inside_cone]),
-            np.zeros_like(fz[~inside_cone]),
-            fx[~inside_cone], fy[~inside_cone], fz[~inside_cone],
-            color='red',
-            alpha=0.5
-        )
-
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
-    ax.set_title('Fuerzas y Cono de Fricción')
-    ax.legend()
-    plt.tight_layout()
-    plt.show()   
-
-    plt.figure(figsize=(12, 6))
-    for i in range(26):
-        plt.plot(tau[i,:].flatten(), label=jnames[i])
-
-    plt.xlabel('Tiempo')
-    plt.ylabel('Torque')
-    plt.title('Torque de las 26 articulaciones en el tiempo')
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')  # Mueve la leyenda fuera del gráfico
-    plt.tight_layout()
-    plt.grid(True)
-    plt.show()
-
-
-
-if __name__ == '__main__': 
-    q_full = np.array(q_full)
-    #plt.figure(figsize=(10, 6))
-
-    plot_results(q_full,fuerzas_resultado,tau_resultado)
-    send_joint_states(q_full)
-
-
+with open(filename, 'w') as file:
+    file.writelines(lines)
+print("Written to line 2")
