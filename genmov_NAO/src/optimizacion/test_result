@@ -1517,9 +1517,9 @@ if __name__ == '__main__':
 
     q_full = np.array(q)
     #plt.figure(figsize=(10, 6))
-    send_joint_states(q_full)
+    #send_joint_states(q_full)
     
-    # plot_results_arms(q_full)
+    plot_results_arms(q_full)
     # plot_results_legs(q_full)
     # plot_forces(fuerzas_resultado,tau_resultado)
     #plot_Com_opt_animated(q_full)

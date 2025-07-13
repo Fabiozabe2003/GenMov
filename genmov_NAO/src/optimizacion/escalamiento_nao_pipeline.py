@@ -6,12 +6,12 @@ import os
 import time
 t_init=time.time()
 
-#dir=sys.argv[1]
-dir="caso3"
+dir=sys.argv[1]
+#dir="caso1_8"
 print(dir)
 directory = '/home/invitado8/momask-codes/motions/nao/{}'.format(dir)
 files = os.listdir(directory)
-file=files[0] #En este caso es el que no es ik
+file=files[0] #En este caso files[1] es el que no es ik
 path=os.path.join(directory, file)
 root = bvhio.readAsHierarchy(path)
 
@@ -119,10 +119,10 @@ rfoot = np.array(rfoot)
 contact_l=[1]*(nframes)
 contact_r=[1]*(nframes)
 
-for i in range(5,nframes):
+for i in range(1,nframes):
     xl,yl,zl=lfoot[i]
     xr,yr,zr=rfoot[i]
-    th=0.07 # 0.03
+    th=0.075 # 0.03
     if (yl>th and yr>th):
         print(yl,yr)
         if yl>yr:
@@ -246,9 +246,8 @@ body_part_data = {
 }
 data = []
 
-
 for body_part, points in body_part_data.items():
-    for frame_idx in range(num_frames//3,num_frames):
+    for frame_idx in range(num_frames):
         # Get the x, y, z coordinates for the current body part and frame
         x, y, z = points[frame_idx]
         # Append the data for the current frame and body part

@@ -25,8 +25,8 @@ dynamic_ddq = build_dynamic_ddq()
 Jacobian_contacts, Jacobian_lcontacts, Jacobian_rcontacts = build_Jacobian_contacts()
 CoM = center_of_mass_fun(model)
 
-#dir=sys.argv[1]
-dir="caso3"
+dir=sys.argv[1]
+#dir="caso1_8"
 print("Dir es el siguiente:",dir)
 csv="/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/motions/{}.csv".format(dir)
 reconstructed_data, left_contact, right_contact =reconstruct(csv)

@@ -6,8 +6,8 @@ from read_data import *
 import threading
 import sys
 
-dir = sys.argv[1]
-#dir = "caso2_2"
+#dir = sys.argv[1]
+dir = "caso2"
 
 csv='/home/invitado8/proy_ws/src/GenMov/genmov_NAO/src/optimizacion/motions/{dir}.csv'.format(dir=dir)
 reconstructed_data, left_contact, right_contact =reconstruct(csv)
@@ -82,6 +82,29 @@ def compute_pitch_roll_error(com, ankle, support_center):
     theta_sup_roll = atan2(sqrt(v[2]**2 + v[1]**2), support_center[1] - ankle[1])
     roll_error = theta_com_roll - theta_sup_roll
     return pitch_error, roll_error
+
+
+    
+def compute_pitch_error(com, ankle_L, ankle_R):
+ 
+    # Punto medio entre ambos tobillos
+    midpoint = 0.5 * (np.array(ankle_L) + np.array(ankle_R))
+    
+    # Centro deseado del polígono de soporte (avanzado en X)
+    support_center = midpoint + np.array([0.015, 0.0, 0.0])
+
+    # Vector del support_center al CoM
+    v = np.array(com) - support_center
+
+    # Ángulo de inclinación real (CoM respecto al support_center) en XZ
+    theta_com_pitch = atan2(v[2], v[0])
+
+    # Ángulo deseado: CoM perfectamente sobre support_center => vertical => 0 rad
+    theta_sup_pitch = 0.0
+
+    pitch_error = theta_sup_pitch - theta_com_pitch
+
+    return pitch_error
 
 pid_pitch = PID(Kp=0.816, Ti=0.5, Td=0.125)
 pid_roll  = PID(Kp=0.888, Ti=0.35, Td=0.875)
@@ -181,7 +204,7 @@ def joints_all(session, q,i,inicial=False):
             com = motion.getCOM("Body", 2, True)
             #com_data[:,i]=com[0:2] # guarar data
             ankle = np.array(motion.getPosition("LLeg", 2, True)[0:3])
-            support = ankle + np.array([0.015, 0.02, 0])
+            support = ankle + np.array([0.015, 0.01, 0])
             # pitch_index = 6
             # roll_index = 7
 
@@ -190,17 +213,24 @@ def joints_all(session, q,i,inicial=False):
             com = motion.getCOM("Body", 2, True)
             #com_data[:,i]=com[0:2]
             ankle = np.array(motion.getPosition("RLeg", 2, True)[0:3])
-            support = ankle + np.array([0.015,-0.02, 0])
+            support = ankle + np.array([0.015,-0.01, 0])
             #pitch_index = 12
             #roll_index = 13
         
         else:
             current_support = None
-            motion.setAngles(joint_names, q, 0.8)
-            com = motion.getCOM("Body", 2, True)
-            #com_data[:,i]=com[0:2]
-            # Esperar hasta completar 0.05 segundos
-            while (time.perf_counter() - start_time) < 0.05: #0.075
+            motion.setAngles(joint_names, q, 0.6)
+            # com = motion.getCOM("Body", 0, True)
+            # #r_ankle = np.array(motion.getPosition("RLeg", 2, True)[0:3])
+            # l_ankle = np.array(motion.getPosition("LLeg", 0, True)[0:3])
+            # support = l_ankle + np.array([0.015,-0.02, 0])
+            # pitch_error, roll_error = compute_pitch_roll_error(com, l_ankle, support) #compute_pitch_error(com,l_ankle,r_ankle)
+            # q_pid[6]   += 0.8*pitch_error
+            # q_pid[12]  += 0.8*pitch_error
+ 
+            # q_pid = [float(x) for x in q_pid]
+            # motion.setAngles(joint_names, q_pid, 0.8)
+            while (time.perf_counter() - start_time) < 0.065: #0.075
                 time.sleep(0.001) 
                 # salir de la funcion
             return
@@ -220,17 +250,17 @@ def joints_all(session, q,i,inicial=False):
             #q_ankles = motion.getAngles(ankle_names, True)
 
             if current_support == "left":
-                q_pid[6] += pitch_error#pid_pitch.compute(pitch_error, dt_pid)  # LAnklePitch
-                q_pid[7] += roll_error#pid_roll.compute(roll_error, dt_pid)    # LAnkleRoll
+                q_pid[6] += 0.5*pitch_error#pid_pitch.compute(pitch_error, dt_pid)  # LAnklePitch
+                q_pid[7] += 0.5*roll_error#pid_roll.compute(roll_error, dt_pid)    # LAnkleRoll
 
             elif current_support == "right":
-                q_pid[12] += pitch_error#pid_pitch.compute(pitch_error, dt_frame)  # RAnklePitch
-                q_pid[13] += roll_error#pid_roll.compute(roll_error, dt_frame)    # RAnkleRoll
+                q_pid[12] += 0.5*pitch_error#pid_pitch.compute(pitch_error, dt_frame)  # RAnklePitch
+                q_pid[13] += 0.5*roll_error#pid_roll.compute(roll_error, dt_frame)    # RAnkleRoll
 
         q_pid = [float(x) for x in q_pid]
-        motion.setAngles(joint_names, q_pid, 0.8)
+        motion.setAngles(joint_names, q_pid, 0.6)
         # Esperar hasta completar 0.05 segundos
-        while (time.perf_counter() - start_time) < 0.05: #0.075
+        while (time.perf_counter() - start_time) < 0.065: #0.075
             time.sleep(0.001)  
 
 
